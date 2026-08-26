@@ -1,183 +1,95 @@
-# AI Risk Manager 🛡️
+# AI Risk Manager
 
-AI-powered ecommerce return-abuse risk detection and decision system.
+AI-powered return abuse detection and risk management system for e-commerce.
 
-## What it does
+The system analyzes customer behavior and return-related signals to estimate the probability of return abuse and recommends an appropriate action.
 
-The system analyzes customer and return behavior and predicts the probability of abuse.
+It combines:
 
-```text
-Return Request
-      ↓
-XGBoost ML Model
-      ↓
-Risk Probability
-      ↓
-Decision Engine
-      ↓
-LOW / MEDIUM / HIGH
-      ↓
-Merchant Action
-```
+- Machine Learning for risk prediction
+- FastAPI for the backend API
+- React for the merchant dashboard
+- Gemini AI for case investigation and explainability
 
-## Current Features
+---
 
-- Customer history analysis
-- Return and refund behavior
-- Account reuse detection
-- Address/device reuse signals
-- Payment failure signals
-- Claim type and product category
-- XGBoost risk model
-- Probability/threshold analysis
-- Cost-sensitive decision analysis
-- Risk decision engine
-- New-case prediction
-- Saved trained model
+## Features
 
-## Current Model Results
+### Risk Prediction
 
-Dataset: 20,000 synthetic return requests.
+The ML model analyzes signals such as:
 
-| Metric | Score |
-|---|---:|
-| Precision | 75.00% |
-| Recall | 49.76% |
-| F1 Score | 59.83% |
-| ROC-AUC | 0.7731 |
-| Brier Score | 0.1738 |
+- Previous returns
+- Previous refunds
+- Return ratio
+- Refund ratio
+- Account reuse
+- Address reuse
+- Device reuse
+- Payment failures
+- Customer account age
+- Order value
+- Claim type
+- Product category
 
-These results are from synthetic data and are for prototype evaluation only.
+The model produces an abuse probability and risk level.
 
-## Risk Decisions
+### Risk-Based Decisions
 
-| Risk Score | Risk Level | Action |
+Cases are classified into:
 
-| < 20% | 🟢 LOW | Auto Approve |
-| 20% - 60% | 🟡 MEDIUM | Request Evidence |
-| >= 60% | 🔴 HIGH | Manual Review |
+| Risk Level | Action |
+|---|---|
+| LOW | Auto Approve |
+| MEDIUM | Request Evidence |
+| HIGH | Manual Review |
 
-## Project Structure
+### Merchant Dashboard
 
-```text
-Ai-Risk-Manager/
-│
-├── data/
-│   └── raw/
-│
-├── models/
-│
-├── src/
-│   ├── data_generation.py
-│   ├── explore_data.py
-│   ├── train.py
-│   ├── evaluate_thresholds.py
-│   ├── cost_analysis.py
-│   ├── calibration.py
-│   ├── decision_engine.py
-│   └── predict.py
-│
-├── .gitignore
-├── README.md
-└── requirements.txt
-```
+The React dashboard provides:
 
-## Setup
+- Total cases
+- High-risk cases
+- Medium-risk cases
+- Low-risk cases
+- Recent risk cases
+- Risk scores
+- Case investigation panel
+- Model metrics
+- Decision routing
 
-Create and activate a virtual environment:
+### Gemini AI Investigation
 
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-```
+For individual cases, Gemini can analyze the available risk signals and provide:
 
-Install dependencies:
+- Risk summary
+- Important risk factors
+- Evidence that should be checked
+- Recommended action
+- AI confidence
 
-```powershell
-py -m pip install -r requirements.txt
-```
+This gives merchants an explanation instead of only showing a numerical risk score.
 
-## Run
+---
 
-Generate data:
-
-```powershell
-py src/data_generation.py
-```
-
-Explore data:
-
-```powershell
-py src/explore_data.py
-```
-
-Train the model:
-
-```powershell
-py src/train.py
-```
-
-Evaluate thresholds:
-
-```powershell
-py src/evaluate_thresholds.py
-```
-
-Analyze merchant costs:
-
-```powershell
-py src/cost_analysis.py
-```
-
-Check calibration:
-
-```powershell
-py src/calibration.py
-```
-
-Test a new return request:
-
-```powershell
-py src/predict.py
-```
-
-## Current Example
-
-A low-risk request can produce:
+## Architecture
 
 ```text
-Risk Score: 11.43%
-Risk Level: LOW
-Action: AUTO_APPROVE
-```
-
-A suspicious request can produce:
-
-```text
-Risk Score: 99.66%
-Risk Level: HIGH
-Action: MANUAL_REVIEW
-```
-
-## Roadmap 🚀
-
-- [x] Dataset generation
-- [x] Exploratory analysis
-- [x] XGBoost model
-- [x] Threshold analysis
-- [x] Cost analysis
-- [x] Calibration analysis
-- [x] Decision engine
-- [x] New-case prediction
-- [x] Model persistence
-- [ ] FastAPI backend
-- [ ] Merchant dashboard
-- [ ] AI explanation layer
-- [ ] Agentic risk investigation
-- [ ] Production deployment
-
-## Note
-
-This project currently uses synthetic data. The model performance and cost assumptions should not be treated as real-world merchant or fraud statistics.
-
-Built as an AI risk-management prototype. 🚀
+                 ┌─────────────────────┐
+                 │     React Frontend  │
+                 │   Merchant Console  │
+                 └──────────┬──────────┘
+                            │
+                            ▼
+                 ┌─────────────────────┐
+                 │      FastAPI        │
+                 │     Backend API     │
+                 └──────────┬──────────┘
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+              ▼                           ▼
+      ┌─────────────────┐       ┌─────────────────┐
+      │   ML Risk Model │       │    Gemini AI    │
+      │     XGBoost     │       │ Investigation   │
+      └─────────────────┘       └─────────────────┘
