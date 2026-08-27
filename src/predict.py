@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import joblib
+from xgboost import DMatrix
 
 from decision_engine import make_decision
 
@@ -25,11 +26,21 @@ def load_model():
             "Run 'py src/train.py' first."
         )
 
-    model = joblib.load(
+    artifact = joblib.load(
         MODEL_PATH
     )
 
-    return model
+    if isinstance(artifact, dict) and "model" in artifact:
+        return artifact["model"]
+
+    return artifact
+
+
+def load_model_metadata():
+    artifact = joblib.load(MODEL_PATH)
+    if isinstance(artifact, dict):
+        return artifact.get("metadata", {})
+    return {}
 
 
 # ============================================================
@@ -38,7 +49,8 @@ def load_model():
 
 def predict_return(
     model,
-    return_request
+    return_request,
+    thresholds=None
 ):
 
     # Convert dictionary into a one-row DataFrame
@@ -59,7 +71,8 @@ def predict_return(
 
     # Apply decision policy
     decision = make_decision(
-        abuse_probability
+        abuse_probability,
+        thresholds=thresholds
     )
 
 
@@ -70,6 +83,28 @@ def predict_return(
         ),
         **decision
     }
+
+
+def explain_prediction(model, return_request, limit=8):
+    """Return XGBoost feature contributions in log-odds space."""
+    input_df = pd.DataFrame([return_request])
+    preprocessor = model.named_steps["preprocessor"]
+    estimator = model.named_steps["model"]
+    transformed = preprocessor.transform(input_df)
+    feature_names = preprocessor.get_feature_names_out()
+    contributions = estimator.get_booster().predict(
+        DMatrix(transformed),
+        pred_contribs=True
+    )[0][:-1]
+    rows = []
+    for name, contribution in zip(feature_names, contributions):
+        clean_name = name.replace("categorical__", "").replace("remainder__", "")
+        rows.append({
+            "feature": clean_name,
+            "contribution": round(float(contribution), 4),
+            "direction": "increases_risk" if contribution >= 0 else "reduces_risk",
+        })
+    return sorted(rows, key=lambda row: abs(row["contribution"]), reverse=True)[:limit]
 
 
 # ============================================================

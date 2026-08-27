@@ -28,7 +28,7 @@ HIGH_RISK_THRESHOLD = 0.60
 # Main decision function
 # ============================================================
 
-def make_decision(risk_probability):
+def make_decision(risk_probability, thresholds=None):
     """
     Convert an ML risk probability into a merchant action.
 
@@ -44,6 +44,18 @@ def make_decision(risk_probability):
         Risk level, score, action and explanation.
     """
 
+    active_thresholds = thresholds or {
+        "low": LOW_RISK_THRESHOLD,
+        "high": HIGH_RISK_THRESHOLD
+    }
+    low_threshold = float(active_thresholds["low"])
+    high_threshold = float(active_thresholds["high"])
+
+    if not 0 <= low_threshold < high_threshold <= 1:
+        raise ValueError(
+            "Decision thresholds must satisfy 0 <= low < high <= 1."
+        )
+
     # --------------------------------------------------------
     # Validate probability
     # --------------------------------------------------------
@@ -58,7 +70,7 @@ def make_decision(risk_probability):
     # LOW RISK
     # --------------------------------------------------------
 
-    if risk_probability < LOW_RISK_THRESHOLD:
+    if risk_probability < low_threshold:
 
         return {
             "risk_score": float(
@@ -80,7 +92,7 @@ def make_decision(risk_probability):
     # MEDIUM RISK
     # --------------------------------------------------------
 
-    if risk_probability < HIGH_RISK_THRESHOLD:
+    if risk_probability < high_threshold:
 
         return {
             "risk_score": float(

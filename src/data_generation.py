@@ -42,6 +42,19 @@ previous_refunds = np.random.poisson(
     size=NUM_SAMPLES
 )
 
+# A customer cannot have more historical returns or refunds than orders.
+# Enforcing this before ratios are calculated keeps every generated row
+# compatible with the API and custom-training schema.
+previous_returns = np.minimum(
+    previous_returns,
+    previous_orders
+)
+
+previous_refunds = np.minimum(
+    previous_refunds,
+    previous_orders
+)
+
 
 # ============================================================
 # 2. Order information

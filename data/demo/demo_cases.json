@@ -1,0 +1,62 @@
+[
+  {
+    "scenario": "Loyal customer, ordinary change-of-mind return",
+    "expected_route": "LOW / AUTO_APPROVE",
+    "request": {
+      "customer_age_days": 900,
+      "previous_orders": 24,
+      "previous_returns": 1,
+      "previous_refunds": 0,
+      "return_ratio": 0.041666666666666664,
+      "refund_ratio": 0,
+      "order_value": 1299,
+      "days_since_purchase": 12,
+      "account_count": 1,
+      "address_reuse_count": 1,
+      "device_reuse_count": 1,
+      "payment_failures": 0,
+      "claim_type": "changed_mind",
+      "product_category": "fashion"
+    }
+  },
+  {
+    "scenario": "Repeat returner requiring evidence",
+    "expected_route": "MEDIUM / REQUEST_EVIDENCE",
+    "request": {
+      "customer_age_days": 600,
+      "previous_orders": 12,
+      "previous_returns": 2,
+      "previous_refunds": 0,
+      "return_ratio": 0.16666666666666666,
+      "refund_ratio": 0,
+      "order_value": 3000,
+      "days_since_purchase": 8,
+      "account_count": 1,
+      "address_reuse_count": 1,
+      "device_reuse_count": 2,
+      "payment_failures": 0,
+      "claim_type": "damaged",
+      "product_category": "home"
+    }
+  },
+  {
+    "scenario": "Linked-account missing-item claim for a high-value order",
+    "expected_route": "HIGH / MANUAL_REVIEW",
+    "request": {
+      "customer_age_days": 45,
+      "previous_orders": 5,
+      "previous_returns": 4,
+      "previous_refunds": 3,
+      "return_ratio": 0.8,
+      "refund_ratio": 0.6,
+      "order_value": 14999,
+      "days_since_purchase": 2,
+      "account_count": 4,
+      "address_reuse_count": 5,
+      "device_reuse_count": 6,
+      "payment_failures": 3,
+      "claim_type": "missing_item",
+      "product_category": "electronics"
+    }
+  }
+]
