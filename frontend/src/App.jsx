@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import "./Storefront.css";
+import PatternPage from "./PatternPage";
+import TrafficPage from "./TrafficPage";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 function App() {
   const isStorefront = window.location.pathname.startsWith("/store");
@@ -14,7 +16,7 @@ function RiskManagerApp() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCase, setSelectedCase] = useState(null);
-  const [activePage, setActivePage] = useState("overview");
+  const [activePage, setActivePage] = useState(() => window.location.pathname === "/patterns" ? "patterns" : window.location.pathname === "/traffic" ? "traffic" : "overview");
   const [showTestCase, setShowTestCase] = useState(false);
   const [modelInfo, setModelInfo] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -23,6 +25,12 @@ function RiskManagerApp() {
     fetchCases();
     fetchModelStatus();
     fetchFeedback();
+  }, []);
+
+  useEffect(() => {
+    const onBack = () => setActivePage(window.location.pathname === "/patterns" ? "patterns" : window.location.pathname === "/traffic" ? "traffic" : "overview");
+    window.addEventListener("popstate", onBack);
+    return () => window.removeEventListener("popstate", onBack);
   }, []);
 
   async function fetchModelStatus() {
@@ -59,10 +67,11 @@ function RiskManagerApp() {
   const highRisk = cases.filter((item) => item.risk_level === "HIGH").length;
   const mediumRisk = cases.filter((item) => item.risk_level === "MEDIUM").length;
   const lowRisk = cases.filter((item) => item.risk_level === "LOW").length;
-  const pageTitle = activePage === "settings" ? "Model Settings" : activePage === "analytics" ? "Risk Analytics" : activePage === "cases" ? "Risk Cases" : "Risk Overview";
+  const pageTitle = activePage === "patterns" ? "Request Patterns" : activePage === "traffic" ? "Request Traffic" : activePage === "settings" ? "Model Settings" : activePage === "analytics" ? "Risk Analytics" : activePage === "cases" ? "Risk Cases" : "Risk Overview";
 
   function navigate(page, sectionId) {
     setActivePage(page);
+    window.history.pushState({}, "", page === "patterns" ? "/patterns" : page === "traffic" ? "/traffic" : "/");
     window.setTimeout(() => sectionId ? document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" }) : window.scrollTo({ top: 0, behavior: "smooth" }), 0);
   }
 
@@ -81,14 +90,16 @@ function RiskManagerApp() {
           <button className={`nav-item ${activePage === "overview" ? "active" : ""}`} onClick={() => navigate("overview")}><span>▦</span>Overview</button>
           <button className={`nav-item ${activePage === "analytics" ? "active" : ""}`} onClick={() => navigate("analytics", "risk-analytics")}><span>⌁</span>Analytics</button>
           <button className={`nav-item ${activePage === "cases" ? "active" : ""}`} onClick={() => navigate("cases", "recent-cases")}><span>◉</span>Risk Cases</button>
-          <button className={`nav-item ${activePage === "settings" ? "active" : ""}`} onClick={() => setActivePage("settings")}><span>⚙</span>Settings</button>
+          <button className={`nav-item ${activePage === "patterns" ? "active" : ""}`} onClick={() => navigate("patterns")}><span>⌘</span>Request Patterns</button>
+          <button className={`nav-item ${activePage === "traffic" ? "active" : ""}`} onClick={() => navigate("traffic")}><span>↗</span>Request Traffic</button>
+          <button className={`nav-item ${activePage === "settings" ? "active" : ""}`} onClick={() => navigate("settings")}><span>⚙</span>Settings</button>
         </nav>
         <div className="sidebar-bottom">
           <div className="system-status">
             <span className="status-dot"></span>
             <div>
-              <strong>System Online</strong>
-              <small>Model API connected</small>
+              <strong>{modelInfo ? "Risk model loaded" : "Model not loaded"}</strong>
+              <small>{modelInfo ? "Ready to review requests" : "Check the API connection"}</small>
             </div>
           </div>
         </div>
@@ -98,7 +109,7 @@ function RiskManagerApp() {
           <div>
             <p className="eyebrow">MERCHANT CONSOLE</p>
             <h2>{pageTitle}</h2>
-            <p className="page-description">{activePage === "settings" ? "Training data, cost assumptions and model controls" : "Live return-abuse monitoring and decision support"}</p>
+            <p className="page-description">{activePage === "patterns" ? "Find requests that share the same details." : activePage === "traffic" ? "Watch new requests and decide when to take a closer look." : activePage === "settings" ? "Manage training data and review costs." : "Review return requests and decide what to do next."}</p>
           </div>
           <div className="topbar-right">
             <div className="model-status">
@@ -108,7 +119,7 @@ function RiskManagerApp() {
             <div className="avatar">PM</div>
           </div>
         </header>
-        {activePage === "settings" ? (
+        {activePage === "patterns" ? <PatternPage apiUrl={API_URL} onView={setSelectedCase} /> : activePage === "traffic" ? <TrafficPage apiUrl={API_URL} onView={setSelectedCase} onChanged={fetchCases} onTest={() => setShowTestCase(true)} /> : activePage === "settings" ? (
           <SettingsPage modelInfo={modelInfo} onTrained={setModelInfo} />
         ) : (
           <Overview cases={cases} loading={loading} fetchCases={fetchCases} onView={setSelectedCase} onTest={() => setShowTestCase(true)} highRisk={highRisk} mediumRisk={mediumRisk} lowRisk={lowRisk} modelInfo={modelInfo} feedback={feedback} />
@@ -124,7 +135,7 @@ function StorefrontApp() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
     try {
@@ -137,10 +148,10 @@ function StorefrontApp() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    const initial = window.setTimeout(refresh, 0);
     const poll = window.setInterval(refresh, 3000);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => { window.clearInterval(poll); window.clearInterval(clock); };
+    return () => { window.clearTimeout(initial); window.clearInterval(poll); window.clearInterval(clock); };
   }, [refresh]);
 
   async function decide(caseId, decision) {
@@ -209,6 +220,7 @@ function getOrderState(order, now) {
   if (order.merchant_decision === "REJECTED") return { label:"Rejected", tone:"danger", group:"rejected", eyebrow:"FINAL DECISION", headline:"Return rejected", detail:"The refund payment has been stopped." };
   if (order.merchant_decision === "APPROVED") return { label:"Approved", tone:"success", group:"approved", eyebrow:"FINAL DECISION", headline:"Refund approved", detail:"A reviewer approved this return before the payment window closed." };
   if (order.system_decision === "AUTO_APPROVED") return { label:"Auto approved", tone:"success", group:"approved", eyebrow:"PAYMENT APPROVED", headline:"Refund is being processed", detail:"The review window ended without a change, so payment was approved automatically." };
+  if (order.gateway_restriction) return { label:"Approvals paused", tone:"warning", group:"review", eyebrow:"MERCHANT RESTRICTION", headline:"Refund approval temporarily paused", detail:`This request is held for review until ${formatDate(order.gateway_restriction.expires_at)}. ${order.is_test ? "Demo restriction only. " : ""}Requests remain under investigation.` };
   if (order.system_decision === "PENDING_AUTO_APPROVAL" && order.decision_due_at) { const remaining = Math.max(0, new Date(order.decision_due_at).getTime() - now); return { label:"Payment scheduled", tone:"scheduled", group:"scheduled", eyebrow:"RETURN ACCEPTED", headline:"Refund payment scheduled", detail:"Review this order before payment is released.", countdown:formatCountdown(remaining), canOverride:remaining > 0 }; }
   if (order.system_decision === "EVIDENCE_REQUIRED") return { label:"Evidence requested", tone:"warning", group:"review", eyebrow:"RETURN REVIEW", headline:"More information required", detail:"Evidence is required before this refund can be approved." };
   return { label:"Under review", tone:"warning", group:"review", eyebrow:"RETURN REVIEW", headline:"Decision in progress", detail:"A reviewer is checking this return request." };
@@ -384,6 +396,7 @@ function Metric({ label, value, percent }) { return <div><span>{label}</span><st
 const LOW_RISK_SAMPLE = { external_reference: "ORDER-DEMO-LOW", customer_age_days: 700, previous_orders: 15, previous_returns: 1, previous_refunds: 0, return_ratio: 0.067, refund_ratio: 0, order_value: 1800, days_since_purchase: 12, account_count: 1, address_reuse_count: 1, device_reuse_count: 1, payment_failures: 0, claim_type: "changed_mind", product_category: "grocery" };
 const HIGH_RISK_SAMPLE = { external_reference: "ORDER-DEMO-HIGH", customer_age_days: 30, previous_orders: 4, previous_returns: 3, previous_refunds: 2, return_ratio: 0.75, refund_ratio: 0.5, order_value: 8500, days_since_purchase: 3, account_count: 3, address_reuse_count: 4, device_reuse_count: 5, payment_failures: 2, claim_type: "missing_item", product_category: "electronics" };
 const NUMBER_FIELDS = [["customer_age_days", "Customer age (days)"], ["previous_orders", "Previous orders"], ["previous_returns", "Previous returns"], ["previous_refunds", "Previous refunds"], ["return_ratio", "Return ratio (0–1)"], ["refund_ratio", "Refund ratio (0–1)"], ["order_value", "Order value (₹)"], ["days_since_purchase", "Days since purchase"], ["account_count", "Linked accounts"], ["address_reuse_count", "Address reuse"], ["device_reuse_count", "Device reuse"], ["payment_failures", "Payment failures"]];
+const IDENTITY_FIELDS = [["account_id", "Account ID"], ["device_id", "Device identity"], ["ip_address", "IP address"], ["location", "Location (city or region)"], ["payment_token", "Payment token (not card details)"], ["address_token", "Address token (not a raw address)"]];
 
 function TestCasePanel({ onClose, onCreated }) {
   const [form, setForm] = useState(LOW_RISK_SAMPLE);
@@ -403,11 +416,20 @@ function TestCasePanel({ onClose, onCreated }) {
   async function submit(event) {
     event.preventDefault(); setSubmitting(true); setError("");
     const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => NUMBER_FIELDS.some(([name]) => name === key) ? [key, Number(value)] : [key, value]));
+    payload.is_test = true;
     if (!payload.external_reference?.trim()) delete payload.external_reference;
     try { const response = await fetch(`${API_URL}/cases`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail?.[0]?.msg || data.detail || "Could not score case."); await onCreated(data.case.id); }
     catch (submitError) { setError(submitError.message); } finally { setSubmitting(false); }
   }
-  return <div className="panel-overlay"><div className="case-panel test-panel"><div className="panel-header"><div><p className="eyebrow">ACTIVE MODEL</p><h2>Test a risk case</h2></div><button className="close-button" onClick={onClose}>×</button></div><div className="sample-switch"><span>Quick sample</span><button onClick={() => setForm(LOW_RISK_SAMPLE)}>Low risk</button><button onClick={() => setForm(HIGH_RISK_SAMPLE)}>High risk</button></div><form onSubmit={submit}><div className="test-form-grid"><label><span>Merchant order/reference</span><input value={form.external_reference || ""} maxLength="200" onChange={(event) => update("external_reference", event.target.value)} /></label>{NUMBER_FIELDS.map(([name, label]) => <label key={name}><span>{label}</span><input required readOnly={name.includes("ratio")} min={["previous_orders", "account_count"].includes(name) ? "1" : "0"} max={name.includes("ratio") ? "1" : undefined} step={name.includes("ratio") || name === "order_value" ? "0.001" : "1"} type="number" value={form[name]} onChange={(event) => update(name, event.target.value)} /></label>)}<label><span>Claim type</span><select value={form.claim_type} onChange={(event) => update("claim_type", event.target.value)}><option value="changed_mind">Changed mind</option><option value="damaged">Damaged</option><option value="missing_item">Missing item</option><option value="wrong_item">Wrong item</option></select></label><label><span>Product category</span><input required value={form.product_category} onChange={(event) => update("product_category", event.target.value)} /></label></div>{error && <div className="form-message error"><strong>Case could not be tested</strong><span>{error}</span></div>}<div className="form-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={submitting}>{submitting ? "Scoring case…" : "Run risk test →"}</button></div></form></div></div>;
+  return <div className="panel-overlay"><div className="case-panel test-panel">
+    <div className="panel-header"><div><p className="eyebrow">ACTIVE MODEL · DEMO SANDBOX</p><h2>Test a risk case</h2></div><button className="close-button" onClick={onClose}>×</button></div>
+    <div className="sample-switch"><span>Quick sample</span><button onClick={() => setForm(LOW_RISK_SAMPLE)}>Low risk</button><button onClick={() => setForm(HIGH_RISK_SAMPLE)}>High risk</button></div>
+    <form onSubmit={submit}>
+      <div className="detail-section"><p className="eyebrow">CUSTOMER & REQUEST IDENTITY</p><p className="explanation-note">This test request appears on the Request Traffic graph. Repeated identifiers appear on Request Patterns. Leave unknown values blank; use city/region labels and opaque tokens, never card numbers or full addresses.</p><div className="test-form-grid">{IDENTITY_FIELDS.map(([name, label]) => <label key={name}><span>{label}</span><input value={form[name] || ""} maxLength={name === "ip_address" ? 64 : 128} placeholder={name === "ip_address" ? "203.0.113.10" : "Optional identifier"} onChange={(event) => update(name, event.target.value)} /></label>)}</div></div>
+      <div className="test-form-grid"><label><span>Merchant order/reference</span><input value={form.external_reference || ""} maxLength="200" onChange={(event) => update("external_reference", event.target.value)} /></label>{NUMBER_FIELDS.map(([name, label]) => <label key={name}><span>{label}</span><input required readOnly={name.includes("ratio")} min={["previous_orders", "account_count"].includes(name) ? "1" : "0"} max={name.includes("ratio") ? "1" : undefined} step={name.includes("ratio") || name === "order_value" ? "0.001" : "1"} type="number" value={form[name]} onChange={(event) => update(name, event.target.value)} /></label>)}<label><span>Claim type</span><select value={form.claim_type} onChange={(event) => update("claim_type", event.target.value)}><option value="changed_mind">Changed mind</option><option value="damaged">Damaged</option><option value="missing_item">Missing item</option><option value="wrong_item">Wrong item</option></select></label><label><span>Product category</span><input required value={form.product_category} onChange={(event) => update("product_category", event.target.value)} /></label></div>
+      {error && <div className="form-message error"><strong>Case could not be tested</strong><span>{error}</span></div>}<div className="form-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={submitting}>{submitting ? "Scoring case…" : "Run risk test →"}</button></div>
+    </form>
+  </div></div>;
 }
 
 
@@ -616,6 +638,8 @@ function CasePanel({
                 <Detail label="Previous Refunds" value={caseData.previous_refunds} />
               </div>
             </div>
+
+            <div className="detail-section identity-details"><p className="eyebrow">CUSTOMER & REQUEST IDENTITY · {caseData.is_test ? "DEMO" : "LIVE"}</p><div className="detail-grid">{IDENTITY_FIELDS.map(([name, label]) => <Detail key={name} label={label} value={caseData[name] || "Not provided"} />)}</div><p className="explanation-note">Request-supplied signals, not verified identity. Shared devices or networks are not proof of abuse.</p>{caseData.gateway_restriction && <div className="form-message error"><strong>Refund approvals temporarily paused</strong><span>Held until {formatDate(caseData.gateway_restriction.expires_at)}. Open Abuse-Ring Sentinel to review or resume the restriction.</span></div>}{caseData.linked_alerts?.map((alert) => <div className="form-message error" key={alert.id}><strong>{alert.classification} · {alert.count} linked requests</strong><span>{alert.summary}</span><span>{alert.caution}</span></div>)}</div>
 
             {explanation.length > 0 && <div className="detail-section"><div className="explain-heading"><div><p className="eyebrow">MODEL EXPLANATION</p><h3>Feature contributions</h3></div><span>LOG-ODDS IMPACT</span></div><div className="contribution-list">{explanation.map((item) => <div key={item.feature} className={item.direction === "increases_risk" ? "risk-up" : "risk-down"}><span>{formatClaim(item.feature)}</span><div className="contribution-track"><i style={{ width: `${Math.min(100, Math.abs(item.contribution) * 35)}%` }}></i></div><strong>{item.contribution > 0 ? "+" : ""}{item.contribution.toFixed(3)}</strong></div>)}</div><small className="explanation-note">Model-native XGBoost contributions. Positive values increase predicted risk; negative values reduce it.</small></div>}
 

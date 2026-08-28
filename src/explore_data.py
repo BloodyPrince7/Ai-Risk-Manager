@@ -1,17 +1,10 @@
 import pandas as pd
 
-# -----------------------------------------
-# Load dataset
-# -----------------------------------------
 
 DATA_PATH = "data/raw/return_abuse_dataset.csv"
 
 df = pd.read_csv(DATA_PATH)
 
-
-# -----------------------------------------
-# Basic information
-# -----------------------------------------
 
 print("\n========== DATASET INFO ==========")
 
@@ -19,28 +12,16 @@ print(f"Rows: {df.shape[0]}")
 print(f"Columns: {df.shape[1]}")
 
 
-# -----------------------------------------
-# Column names
-# -----------------------------------------
-
 print("\n========== COLUMNS ==========")
 
 for column in df.columns:
     print(column)
 
 
-# -----------------------------------------
-# Missing values
-# -----------------------------------------
-
 print("\n========== MISSING VALUES ==========")
 
 print(df.isnull().sum())
 
-
-# -----------------------------------------
-# Target distribution
-# -----------------------------------------
 
 print("\n========== TARGET DISTRIBUTION ==========")
 
@@ -55,18 +36,10 @@ print(
 )
 
 
-# -----------------------------------------
-# Numerical statistics
-# -----------------------------------------
-
 print("\n========== NUMERICAL STATISTICS ==========")
 
 print(df.describe())
 
-
-# -----------------------------------------
-# Categorical values
-# -----------------------------------------
 
 print("\n========== CATEGORICAL FEATURES ==========")
 
@@ -76,10 +49,6 @@ print(df["claim_type"].value_counts())
 print("\nProduct Categories:")
 print(df["product_category"].value_counts())
 
-
-# -----------------------------------------
-# Compare behavior by class
-# -----------------------------------------
 
 print("\n========== BEHAVIOR BY CLASS ==========")
 

@@ -7,7 +7,9 @@ from fastapi import (
     Request
 )
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
+from ipaddress import ip_address
+from typing import Literal
 
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -25,19 +27,11 @@ from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
 
-# ============================================================
-# Project paths
-# ============================================================
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = ROOT_DIR / "src"
 
 sys.path.append(str(SRC_DIR))
 
-
-# ============================================================
-# ML imports
-# ============================================================
 
 from predict import (
     explain_prediction,
@@ -48,17 +42,9 @@ from predict import (
 from model_training import REQUIRED_COLUMNS, apply_cost_settings, save_model_artifact, train_custom_model
 
 
-# ============================================================
-# AI Investigation Agent
-# ============================================================
-
 from agent.evidence_verifier import verify_evidence_file
 from agent.investigator import investigate_case
 
-
-# ============================================================
-# Database imports
-# ============================================================
 
 sys.path.append(
     str(ROOT_DIR)
@@ -70,12 +56,10 @@ from database.database import (
     get_db
 )
 
-from database.models import CaseEvent, CaseEvidence, EvidenceVerification, RiskCase
+from database.models import CaseEvent, CaseEvidence, EvidenceVerification, RiskCase, GatewayRestriction, SentinelSettings, RequestArrival
+from api.sentinel import IDENTITY_FIELDS, active_restrictions, case_identity_payload, monitor, restriction_for, restriction_payload
+from api.request_monitoring import router as monitoring_router, intake_lock, ensure_intake_open, record_arrival, case_patterns
 
-
-# ============================================================
-# Create database tables
-# ============================================================
 
 Base.metadata.create_all(
     bind=engine
@@ -86,6 +70,13 @@ def migrate_local_schema():
     """Apply the small additive migration required by existing SQLite demos."""
 
     columns = {column["name"] for column in inspect(engine).get_columns("risk_cases")}
+    with engine.begin() as connection:
+        for name in IDENTITY_FIELDS:
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE risk_cases ADD COLUMN {name} VARCHAR"))
+        if "is_test" not in columns:
+            connection.execute(text("ALTER TABLE risk_cases ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cases_monitor_window ON risk_cases (is_test, created_at)"))
     if "external_reference" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE risk_cases ADD COLUMN external_reference VARCHAR"))
@@ -111,10 +102,19 @@ def migrate_local_schema():
 
 migrate_local_schema()
 
+def backfill_arrival_history():
+    """Import legacy cases once, retaining their original receipt timestamps."""
+    with engine.begin() as connection:
+        fields = ", ".join(IDENTITY_FIELDS)
+        connection.execute(text(
+            f"INSERT INTO request_arrivals (case_id, external_reference, {fields}, claim_type, product_category, is_test, status, created_at) "
+            f"SELECT id, external_reference, {fields}, claim_type, product_category, is_test, 'accepted', created_at FROM risk_cases "
+            "WHERE NOT EXISTS (SELECT 1 FROM request_arrivals WHERE request_arrivals.case_id = risk_cases.id)"
+        ))
 
-# ============================================================
-# FastAPI
-# ============================================================
+
+backfill_arrival_history()
+
 
 app = FastAPI(
     title="AI Risk Manager API",
@@ -124,27 +124,17 @@ app = FastAPI(
     ),
     version="0.4.0"
 )
+app.include_router(monitoring_router)
 
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173"
-    ],
+    allow_origins=os.getenv("RISK_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# ============================================================
-# Load model once
-# ============================================================
 
 print("Loading risk model...")
 
@@ -157,10 +147,6 @@ EVIDENCE_DIR = ROOT_DIR / "data" / "evidence"
 
 print("Risk model loaded successfully!")
 
-
-# ============================================================
-# Request schema
-# ============================================================
 
 class ReturnRequest(BaseModel):
 
@@ -245,11 +231,46 @@ class ReturnRequest(BaseModel):
 
 class CaseCreateRequest(ReturnRequest):
     external_reference: str | None = Field(default=None, min_length=1, max_length=200)
+    account_id: str | None = Field(default=None, max_length=128)
+    device_id: str | None = Field(default=None, max_length=128)
+    ip_address: str | None = Field(default=None, max_length=64)
+    payment_token: str | None = Field(default=None, max_length=128)
+    address_token: str | None = Field(default=None, max_length=128)
+    location: str | None = Field(default=None, max_length=128)
+    is_test: bool = False
+
+    @field_validator(*IDENTITY_FIELDS, mode="before")
+    @classmethod
+    def clean_identity(cls, value):
+        return (value.strip() or None) if isinstance(value, str) else value
+
+    @field_validator("ip_address")
+    @classmethod
+    def normalize_ip(cls, value):
+        if value is None:
+            return None
+        address = ip_address(value)
+        if getattr(address, "scope_id", None):
+            raise ValueError("Scoped IPv6 addresses are not supported")
+        return str(getattr(address, "ipv4_mapped", None) or address)
 
 
-# ============================================================
-# Merchant decision schema
-# ============================================================
+class MonitorSettingsRequest(BaseModel):
+    threshold: int = Field(10, ge=2, le=100)
+    window_minutes: int = Field(10, ge=1, le=60)
+
+
+class RestrictionRequest(BaseModel):
+    alert_id: str
+    scope: Literal["linked", "gateway"] = "linked"
+    duration_minutes: Literal[5, 15, 30, 60] = 15
+    is_test: bool = False
+
+
+class SentinelDemoRequest(BaseModel):
+    scenario: Literal["ip", "device", "account", "location", "ring", "normal"] = "ring"
+    count: int = Field(10, ge=1, le=100)
+
 
 class MerchantDecision(BaseModel):
 
@@ -266,10 +287,6 @@ class VerifiedOutcome(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
-# ============================================================
-# Root
-# ============================================================
-
 @app.get("/")
 def root():
 
@@ -279,10 +296,6 @@ def root():
         "version": "0.4.0"
     }
 
-
-# ============================================================
-# Health
-# ============================================================
 
 @app.get("/health")
 def health():
@@ -336,10 +349,6 @@ def update_cost_settings(settings: CostSettings):
     return {"success": True, "model": public_model_metadata()}
 
 
-# ============================================================
-# Predict only
-# ============================================================
-
 @app.post("/predict")
 def predict(
     request: ReturnRequest
@@ -386,11 +395,15 @@ def schedule_case_decision(case: RiskCase, db: Session) -> None:
         event = CaseEvent(case_id=case.id, event_type="SYSTEM_ROUTING", value="MANUAL_REVIEW", note="A merchant decision is required.")
     db.add(case)
     db.add(event)
-    db.commit()
-    db.refresh(case)
+    restriction = restriction_for(case, active_restrictions(db))
+    if restriction:
+        db.add(CaseEvent(case_id=case.id, event_type="GATEWAY_PAUSED", value=str(restriction.id),
+                         note=f"New request received during a merchant restriction. Approvals held until {utc_iso(restriction.expires_at)}."))
+    db.flush()
 
 
 def finalize_due_auto_approvals(db: Session) -> None:
+    restrictions = active_restrictions(db)
     due_cases = (
         db.query(RiskCase)
         .filter(
@@ -402,6 +415,8 @@ def finalize_due_auto_approvals(db: Session) -> None:
         .all()
     )
     for case in due_cases:
+        if restriction_for(case, restrictions):
+            continue
         case.system_decision = "AUTO_APPROVED"
         db.add(case)
         db.add(CaseEvent(
@@ -414,26 +429,21 @@ def finalize_due_auto_approvals(db: Session) -> None:
         db.commit()
 
 
-# ============================================================
-# Create a risk case
-# ============================================================
-
 @app.post("/cases")
 def create_case(
     request: CaseCreateRequest,
     db: Session = Depends(get_db)
 ):
-
-    # --------------------------------------------------------
-    # Convert request to dictionary
-    # --------------------------------------------------------
-
-    request_data = request.model_dump(exclude={"external_reference"})
+    with intake_lock:
+        ensure_intake_open(db, [request])
+        return persist_case(request, db)
 
 
-    # --------------------------------------------------------
-    # Run ML prediction
-    # --------------------------------------------------------
+def persist_case(request: CaseCreateRequest, db: Session, commit=True):
+
+
+    request_data = request.model_dump(include=set(ReturnRequest.model_fields))
+
 
     result = predict_return(
         model,
@@ -441,10 +451,6 @@ def create_case(
         thresholds=model_metadata.get("routing_thresholds")
     )
 
-
-    # --------------------------------------------------------
-    # Create database record
-    # --------------------------------------------------------
 
     case = RiskCase(
 
@@ -492,32 +498,30 @@ def create_case(
             "action"
         ],
 
-        external_reference=request.external_reference
+        external_reference=request.external_reference,
+        **{field: getattr(request, field) for field in IDENTITY_FIELDS},
+        is_test=int(request.is_test),
+        created_at=utc_now(),
     )
 
 
-    # --------------------------------------------------------
-    # Save
-    # --------------------------------------------------------
-
     db.add(case)
 
-    db.commit()
-
-    db.refresh(case)
+    db.flush()
 
     schedule_case_decision(case, db)
+    record_arrival(db, request, "accepted", case.id)
+    if commit:
+        db.commit()
+        db.refresh(case)
 
-
-    # --------------------------------------------------------
-    # Return
-    # --------------------------------------------------------
 
     return {
         "success": True,
 
         "case": {
             "id": case.id,
+            **case_identity_payload(case, active_restrictions(db)),
 
             "abuse_probability":
                 case.abuse_probability,
@@ -544,14 +548,96 @@ def create_case(
                 utc_iso(case.decision_due_at),
 
             "created_at":
-                case.created_at
+                utc_iso(case.created_at)
         }
     }
 
 
-# ============================================================
-# Get all cases
-# ============================================================
+@app.get("/monitoring/sentinel")
+def sentinel_status(is_test: bool = False, db: Session = Depends(get_db)):
+    return monitor(db, is_test)
+
+
+@app.patch("/monitoring/sentinel/settings")
+def sentinel_settings(settings: MonitorSettingsRequest, db: Session = Depends(get_db)):
+    row = db.get(SentinelSettings, 1) or SentinelSettings(id=1)
+    row.threshold = settings.threshold
+    row.window_minutes = settings.window_minutes
+    db.add(row)
+    db.commit()
+    return settings.model_dump()
+
+
+@app.post("/monitoring/sentinel/restrictions")
+def pause_gateway(request: RestrictionRequest, db: Session = Depends(get_db)):
+    snapshot = monitor(db, request.is_test)
+    alert = next((item for item in snapshot["alerts"] if item["id"] == request.alert_id), None)
+    if not alert:
+        raise HTTPException(status_code=409, detail="This alert has expired or changed. Refresh monitoring before restricting approvals.")
+    now = utc_now()
+    restriction = GatewayRestriction(
+        scope=request.scope, is_test=int(request.is_test),
+        identities_json=json.dumps(alert["identities"]),
+        evidence_json=json.dumps(alert), reason=alert["summary"],
+        created_at=now, expires_at=now + timedelta(minutes=request.duration_minutes),
+    )
+    db.add(restriction)
+    db.flush()
+    for case in db.query(RiskCase).filter(RiskCase.is_test == int(request.is_test)).all():
+        if restriction_for(case, [restriction]):
+            db.add(CaseEvent(case_id=case.id, event_type="GATEWAY_PAUSED", value=str(restriction.id),
+                             note=f"Merchant paused {request.scope} approvals until {utc_iso(restriction.expires_at)}. {alert['summary']}"))
+    db.commit()
+    return restriction_payload(restriction)
+
+
+@app.post("/monitoring/sentinel/restrictions/{restriction_id}/resume")
+def resume_gateway(restriction_id: int, db: Session = Depends(get_db)):
+    restriction = db.get(GatewayRestriction, restriction_id)
+    if not restriction:
+        raise HTTPException(status_code=404, detail="Restriction not found")
+    if restriction.resumed_at is None and restriction.expires_at > utc_now():
+        for case in db.query(RiskCase).filter(RiskCase.is_test == restriction.is_test).all():
+            if restriction_for(case, [restriction]):
+                db.add(CaseEvent(case_id=case.id, event_type="GATEWAY_RESUMED", value=str(restriction.id),
+                                 note="Merchant ended this restriction. Other active restrictions still apply."))
+        restriction.resumed_at = utc_now()
+        db.commit()
+    return restriction_payload(restriction)
+
+
+@app.post("/monitoring/sentinel/demo")
+def sentinel_demo(request: SentinelDemoRequest, db: Session = Depends(get_db)):
+    with intake_lock:
+        return create_demo_batch(request, db)
+
+
+def create_demo_batch(request: SentinelDemoRequest, db: Session):
+    # Server timestamps and unique identities per run; no backdated/live data.
+    batch = uuid.uuid4().hex[:12]
+    cases = []
+    payloads = []
+    for index in range(request.count):
+        payload = CaseCreateRequest(
+            external_reference=f"SENTINEL-{batch}-{index + 1:02d}", is_test=True,
+            account_id=f"demo-account-{batch}-{0 if request.scenario == 'account' else index}",
+            device_id=f"demo-device-{batch}-{0 if request.scenario in ('device', 'ring') else index}",
+            ip_address=f"2001:db8:{int(batch[:4], 16):x}:{int(batch[4:8], 16):x}:{int(batch[8:], 16):x}::{1 if request.scenario in ('ip', 'ring') else index + 1}",
+            payment_token=f"demo-payment-{batch}-{0 if request.scenario == 'ring' else index}",
+            address_token=f"demo-address-{batch}-{0 if request.scenario == 'ring' else index}",
+            location="Demo city" if request.scenario in ("location", "ring") else f"Demo region {index + 1}",
+            customer_age_days=900, previous_orders=24, previous_returns=1, previous_refunds=0,
+            return_ratio=1 / 24, refund_ratio=0, order_value=1299, days_since_purchase=12,
+            account_count=1, address_reuse_count=1, device_reuse_count=1, payment_failures=0,
+            claim_type="changed_mind", product_category="fashion",
+        )
+        payloads.append(payload)
+    ensure_intake_open(db, payloads)
+    for payload in payloads:
+        cases.append(persist_case(payload, db, commit=False)["case"]["id"])
+    db.commit()
+    return {"batch": batch, "case_ids": cases, "is_test": True, "monitoring": monitor(db, True)}
+
 
 @app.get("/cases")
 def get_cases(
@@ -567,6 +653,7 @@ def get_cases(
         )
         .all()
     )
+    restrictions = active_restrictions(db)
 
     return {
         "success": True,
@@ -577,6 +664,7 @@ def get_cases(
 
             {
                 "id": case.id,
+                **case_identity_payload(case, restrictions),
 
                 "risk_score":
                     case.risk_score,
@@ -609,17 +697,13 @@ def get_cases(
                     utc_iso(case.decision_due_at),
 
                 "created_at":
-                    case.created_at
+                    utc_iso(case.created_at)
             }
 
             for case in cases
         ]
     }
 
-
-# ============================================================
-# Get a single case
-# ============================================================
 
 @app.get("/cases/{case_id}")
 def get_case(
@@ -652,6 +736,8 @@ def get_case(
         "case": {
 
             "id": case.id,
+            **case_identity_payload(case, active_restrictions(db)),
+            "linked_alerts": case_patterns(db, case.id, bool(case.is_test)),
 
             "external_reference":
                 case.external_reference,
@@ -720,14 +806,10 @@ def get_case(
                 case.merchant_decision,
 
             "created_at":
-                case.created_at
+                utc_iso(case.created_at)
         }
     }
 
-
-# ============================================================
-# AI Investigation
-# ============================================================
 
 @app.get("/cases/{case_id}/explanation")
 def get_model_explanation(case_id: int, db: Session = Depends(get_db)):
@@ -763,9 +845,6 @@ def investigate(
     db: Session = Depends(get_db)
 ):
 
-    # --------------------------------------------------------
-    # Find case
-    # --------------------------------------------------------
 
     case = (
         db.query(RiskCase)
@@ -783,9 +862,6 @@ def investigate(
             detail="Case not found"
         )
 
-    # --------------------------------------------------------
-    # Convert database case into dictionary
-    # --------------------------------------------------------
 
     case_data = {
 
@@ -847,10 +923,6 @@ def investigate(
     }
 
 
-    # --------------------------------------------------------
-    # Send case to Gemini Investigator
-    # --------------------------------------------------------
-
     try:
 
         investigation = investigate_case(
@@ -872,10 +944,6 @@ def investigate(
         )
 
 
-    # --------------------------------------------------------
-    # Return investigation
-    # --------------------------------------------------------
-
     return {
 
         "success": True,
@@ -886,10 +954,6 @@ def investigate(
 
     }
 
-
-# ============================================================
-# Update merchant decision
-# ============================================================
 
 @app.patch(
     "/cases/{case_id}/decision"
@@ -916,10 +980,17 @@ def update_decision(
             detail="Case not found"
         )
 
+    if case.system_decision == "AUTO_APPROVED":
+        raise HTTPException(status_code=409, detail="This return has already been automatically approved.")
+    held = restriction_for(case, active_restrictions(db), include_completed=True)
+    if held and decision.decision == "APPROVED":
+        raise HTTPException(status_code=409, detail=f"Refund approvals are paused until {utc_iso(held.expires_at)}. Resume the restriction in Abuse-Ring Sentinel first.")
+
     if (
         case.recommended_action == "AUTO_APPROVE"
         and case.decision_due_at is not None
         and case.decision_due_at <= utc_now()
+        and not held
     ):
         finalize_due_auto_approvals(db)
         raise HTTPException(status_code=409, detail="The one-hour decision window has closed.")
@@ -976,10 +1047,6 @@ def update_decision(
     }
 
 
-# ============================================================
-# Delete a case and its review data
-# ============================================================
-
 @app.delete("/cases/{case_id}")
 def delete_case(case_id: int, db: Session = Depends(get_db)):
     case = db.query(RiskCase).filter(RiskCase.id == case_id).first()
@@ -992,6 +1059,9 @@ def delete_case(case_id: int, db: Session = Depends(get_db)):
     db.query(EvidenceVerification).filter(EvidenceVerification.case_id == case_id).delete(synchronize_session=False)
     db.query(CaseEvent).filter(CaseEvent.case_id == case_id).delete(synchronize_session=False)
     db.query(CaseEvidence).filter(CaseEvidence.case_id == case_id).delete(synchronize_session=False)
+    db.query(RequestArrival).filter(RequestArrival.case_id == case_id).update(
+        {"case_id": None, "external_reference": None, "claim_type": None, "product_category": None,
+         **{field: None for field in IDENTITY_FIELDS}}, synchronize_session=False)
     db.delete(case)
     db.commit()
 
@@ -1008,10 +1078,6 @@ def delete_case(case_id: int, db: Session = Depends(get_db)):
 
     return {"success": True, "case_id": case_id, "deleted": True}
 
-
-# ============================================================
-# Evidence, outcomes, and review audit trail
-# ============================================================
 
 @app.get("/cases/{case_id}/review")
 def get_case_review(case_id: int, db: Session = Depends(get_db)):
@@ -1199,10 +1265,6 @@ def feedback_summary(db: Session = Depends(get_db)):
         "estimated_loss_realized": round(lost, 2),
     }
 
-
-# ============================================================
-# Custom model training
-# ============================================================
 
 @app.get("/model/training-schema")
 def training_schema():

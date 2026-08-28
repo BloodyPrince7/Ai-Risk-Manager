@@ -3,19 +3,11 @@ import numpy as np
 import pandas as pd
 
 
-# ============================================================
-# Configuration
-# ============================================================
-
 NUM_SAMPLES = 20_000
 RANDOM_SEED = 42
 
 np.random.seed(RANDOM_SEED)
 
-
-# ============================================================
-# 1. Customer information
-# ============================================================
 
 customer_age_days = np.random.randint(
     30,
@@ -56,10 +48,6 @@ previous_refunds = np.minimum(
 )
 
 
-# ============================================================
-# 2. Order information
-# ============================================================
-
 order_value = np.random.lognormal(
     mean=7.5,
     sigma=0.8,
@@ -79,10 +67,6 @@ days_since_purchase = np.random.randint(
 )
 
 
-# ============================================================
-# 3. Behavioral features
-# ============================================================
-
 return_ratio = (
     previous_returns /
     np.maximum(previous_orders, 1)
@@ -93,10 +77,6 @@ refund_ratio = (
     np.maximum(previous_orders, 1)
 )
 
-
-# ============================================================
-# 4. Account / identity behavior
-# ============================================================
 
 account_count = np.random.choice(
     [1, 2, 3, 4],
@@ -115,19 +95,11 @@ device_reuse_count = np.random.poisson(
 )
 
 
-# ============================================================
-# 5. Payment behavior
-# ============================================================
-
 payment_failures = np.random.poisson(
     lam=0.5,
     size=NUM_SAMPLES
 )
 
-
-# ============================================================
-# 6. Categorical features
-# ============================================================
 
 claim_type = np.random.choice(
     [
@@ -167,9 +139,6 @@ product_category = np.random.choice(
 )
 
 
-# ============================================================
-# 7. Simulate underlying behavioral risk
-# ============================================================
 #
 # IMPORTANT:
 #
@@ -180,32 +149,19 @@ product_category = np.random.choice(
 #
 # The ML model will later try to learn these patterns WITHOUT
 # being given this risk formula.
-# ============================================================
 
 risk_score = np.zeros(NUM_SAMPLES)
 
-
-# ------------------------------------------------------------
-# Return behavior
-# ------------------------------------------------------------
 
 risk_score += (
     2.5 * return_ratio
 )
 
 
-# ------------------------------------------------------------
-# Refund behavior
-# ------------------------------------------------------------
-
 risk_score += (
     2.0 * refund_ratio
 )
 
-
-# ------------------------------------------------------------
-# Account behavior
-# ------------------------------------------------------------
 
 risk_score += (
     0.45 *
@@ -213,19 +169,11 @@ risk_score += (
 )
 
 
-# ------------------------------------------------------------
-# Address reuse
-# ------------------------------------------------------------
-
 risk_score += (
     0.20 *
     address_reuse_count
 )
 
-
-# ------------------------------------------------------------
-# Device reuse
-# ------------------------------------------------------------
 
 risk_score += (
     0.20 *
@@ -233,19 +181,11 @@ risk_score += (
 )
 
 
-# ------------------------------------------------------------
-# Payment failures
-# ------------------------------------------------------------
-
 risk_score += (
     0.15 *
     payment_failures
 )
 
-
-# ------------------------------------------------------------
-# High-value order behavior
-# ------------------------------------------------------------
 
 risk_score += (
     0.000015 *
@@ -253,9 +193,6 @@ risk_score += (
 )
 
 
-# ============================================================
-# 8. Behavioral interactions
-# ============================================================
 #
 # These are important because suspicious behavior is often
 # stronger when multiple signals occur together.
@@ -270,7 +207,6 @@ risk_score += (
 #
 # High returns + refunds + device/account reuse:
 #       → much stronger concern
-# ============================================================
 
 
 # Return + refund interaction
@@ -305,10 +241,6 @@ risk_score += (
 )
 
 
-# ============================================================
-# 9. Claim-type influence
-# ============================================================
-
 claim_risk = {
     "damaged": 0.10,
     "wrong_item": 0.05,
@@ -322,10 +254,6 @@ risk_score += np.array([
     for claim in claim_type
 ])
 
-
-# ============================================================
-# 10. Product-category influence
-# ============================================================
 
 category_risk = {
     "electronics": 0.20,
@@ -341,15 +269,11 @@ risk_score += np.array([
 ])
 
 
-# ============================================================
-# 11. Add uncertainty/noise
-# ============================================================
 #
 # Real-world behavior is not perfectly predictable.
 #
 # This prevents the dataset from becoming a simple deterministic
 # rule-based problem.
-# ============================================================
 
 risk_score += np.random.normal(
     loc=0,
@@ -358,9 +282,6 @@ risk_score += np.random.normal(
 )
 
 
-# ============================================================
-# 12. Convert risk score → probability
-# ============================================================
 #
 # Sigmoid converts the score into a value between 0 and 1.
 #
@@ -369,7 +290,6 @@ risk_score += np.random.normal(
 # 1.0 → very high probability
 #
 # The 2.8 offset controls the overall prevalence of abuse.
-# ============================================================
 
 abuse_probability = 1 / (
     1 +
@@ -378,10 +298,6 @@ abuse_probability = 1 / (
     )
 )
 
-
-# ============================================================
-# 13. Inspect probability distribution
-# ============================================================
 
 print("\n========== RISK PROBABILITY ==========")
 
@@ -402,9 +318,6 @@ print(
 )
 
 
-# ============================================================
-# 14. Generate labels
-# ============================================================
 #
 # We don't simply say:
 #
@@ -414,17 +327,12 @@ print(
 # receives the abuse label.
 #
 # This introduces realistic uncertainty.
-# ============================================================
 
 is_abuse = np.random.binomial(
     n=1,
     p=abuse_probability
 )
 
-
-# ============================================================
-# 15. Build dataframe
-# ============================================================
 
 df = pd.DataFrame({
 
@@ -475,10 +383,6 @@ df = pd.DataFrame({
 })
 
 
-# ============================================================
-# 16. Save dataset
-# ============================================================
-
 output_path = (
     "data/raw/return_abuse_dataset.csv"
 )
@@ -488,10 +392,6 @@ df.to_csv(
     index=False
 )
 
-
-# ============================================================
-# 17. Display dataset information
-# ============================================================
 
 print("\n========== DATASET GENERATED ==========")
 

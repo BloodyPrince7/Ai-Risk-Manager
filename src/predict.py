@@ -6,16 +6,8 @@ from xgboost import DMatrix
 from decision_engine import make_decision
 
 
-# ============================================================
-# Configuration
-# ============================================================
-
 MODEL_PATH = "models/risk_model.pkl"
 
-
-# ============================================================
-# Load trained model
-# ============================================================
 
 def load_model():
 
@@ -42,10 +34,6 @@ def load_model_metadata():
         return artifact.get("metadata", {})
     return {}
 
-
-# ============================================================
-# Predict a new return request
-# ============================================================
 
 def predict_return(
     model,
@@ -107,10 +95,6 @@ def explain_prediction(model, return_request, limit=8):
     return sorted(rows, key=lambda row: abs(row["contribution"]), reverse=True)[:limit]
 
 
-# ============================================================
-# Test
-# ============================================================
-
 if __name__ == "__main__":
 
     print(
@@ -123,10 +107,6 @@ if __name__ == "__main__":
         "Model loaded successfully!"
     )
 
-
-    # ========================================================
-    # New LOW-RISK request
-    # ========================================================
 
     low_risk_request = {
 
@@ -159,10 +139,6 @@ if __name__ == "__main__":
         "product_category": "grocery"
     }
 
-
-    # ========================================================
-    # New HIGH-RISK request
-    # ========================================================
 
     suspicious_request = {
 

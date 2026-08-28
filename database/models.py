@@ -13,18 +13,10 @@ from sqlalchemy import (
 from .database import Base
 
 
-# ============================================================
-# Return Risk Case
-# ============================================================
-
 class RiskCase(Base):
 
     __tablename__ = "risk_cases"
 
-
-    # --------------------------------------------------------
-    # Primary key
-    # --------------------------------------------------------
 
     id = Column(
         Integer,
@@ -32,10 +24,6 @@ class RiskCase(Base):
         index=True
     )
 
-
-    # --------------------------------------------------------
-    # Customer / history
-    # --------------------------------------------------------
 
     customer_age_days = Column(
         Integer,
@@ -58,10 +46,6 @@ class RiskCase(Base):
     )
 
 
-    # --------------------------------------------------------
-    # Behavioral features
-    # --------------------------------------------------------
-
     return_ratio = Column(
         Float,
         nullable=False
@@ -73,10 +57,6 @@ class RiskCase(Base):
     )
 
 
-    # --------------------------------------------------------
-    # Transaction
-    # --------------------------------------------------------
-
     order_value = Column(
         Float,
         nullable=False
@@ -87,10 +67,6 @@ class RiskCase(Base):
         nullable=False
     )
 
-
-    # --------------------------------------------------------
-    # Reuse signals
-    # --------------------------------------------------------
 
     account_count = Column(
         Integer,
@@ -113,10 +89,6 @@ class RiskCase(Base):
     )
 
 
-    # --------------------------------------------------------
-    # Categorical features
-    # --------------------------------------------------------
-
     claim_type = Column(
         String,
         nullable=False
@@ -127,10 +99,6 @@ class RiskCase(Base):
         nullable=False
     )
 
-
-    # --------------------------------------------------------
-    # ML result
-    # --------------------------------------------------------
 
     abuse_probability = Column(
         Float,
@@ -157,6 +125,14 @@ class RiskCase(Base):
         nullable=True
     )
 
+    account_id = Column(String, nullable=True)
+    device_id = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    payment_token = Column(String, nullable=True)
+    address_token = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    is_test = Column(Integer, nullable=False, default=0, server_default="0")
+
     system_decision = Column(
         String,
         nullable=True
@@ -168,25 +144,69 @@ class RiskCase(Base):
     )
 
 
-    # --------------------------------------------------------
-    # Merchant decision
-    # --------------------------------------------------------
-
     merchant_decision = Column(
         String,
         nullable=True
     )
 
 
-    # --------------------------------------------------------
-    # Timestamp
-    # --------------------------------------------------------
-
     created_at = Column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
         nullable=False
     )
+
+
+class RequestArrival(Base):
+    __tablename__ = "request_arrivals"
+
+    id = Column(Integer, primary_key=True)
+    case_id = Column(Integer, nullable=True, unique=True)
+    external_reference = Column(String, nullable=True)
+    account_id = Column(String, nullable=True)
+    device_id = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    payment_token = Column(String, nullable=True)
+    address_token = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    claim_type = Column(String, nullable=True)
+    product_category = Column(String, nullable=True)
+    is_test = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+
+class IntakePause(Base):
+    __tablename__ = "intake_pauses"
+
+    id = Column(Integer, primary_key=True)
+    scope = Column(String, nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    resumed_at = Column(DateTime, nullable=True)
+
+
+class SentinelSettings(Base):
+    __tablename__ = "sentinel_settings"
+
+    id = Column(Integer, primary_key=True)
+    threshold = Column(Integer, nullable=False, default=10)
+    window_minutes = Column(Integer, nullable=False, default=10)
+
+
+class GatewayRestriction(Base):
+    __tablename__ = "gateway_restrictions"
+
+    id = Column(Integer, primary_key=True)
+    scope = Column(String, nullable=False)
+    is_test = Column(Integer, nullable=False, default=0)
+    identities_json = Column(Text, nullable=False)
+    evidence_json = Column(Text, nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    resumed_at = Column(DateTime, nullable=True)
 
 
 class CaseEvidence(Base):

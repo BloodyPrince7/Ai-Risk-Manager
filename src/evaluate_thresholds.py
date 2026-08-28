@@ -16,26 +16,14 @@ from sklearn.metrics import (
 from xgboost import XGBClassifier
 
 
-# ============================================================
-# 1. Load dataset
-# ============================================================
-
 DATA_PATH = "data/raw/return_abuse_dataset.csv"
 
 df = pd.read_csv(DATA_PATH)
 
 
-# ============================================================
-# 2. Separate features and target
-# ============================================================
-
 X = df.drop("is_abuse", axis=1)
 y = df["is_abuse"]
 
-
-# ============================================================
-# 3. Define feature types
-# ============================================================
 
 categorical_features = [
     "claim_type",
@@ -58,10 +46,6 @@ numerical_features = [
 ]
 
 
-# ============================================================
-# 4. Train/Test Split
-# ============================================================
-
 X_train, X_test, y_train, y_test = train_test_split(
     X,
     y,
@@ -70,10 +54,6 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
-
-# ============================================================
-# 5. Preprocessing
-# ============================================================
 
 preprocessor = ColumnTransformer(
     transformers=[
@@ -87,10 +67,6 @@ preprocessor = ColumnTransformer(
 )
 
 
-# ============================================================
-# 6. Create XGBoost model
-# ============================================================
-
 model = XGBClassifier(
     n_estimators=300,
     max_depth=5,
@@ -103,10 +79,6 @@ model = XGBClassifier(
 )
 
 
-# ============================================================
-# 7. Complete pipeline
-# ============================================================
-
 pipeline = Pipeline(
     steps=[
         ("preprocessor", preprocessor),
@@ -115,10 +87,6 @@ pipeline = Pipeline(
 )
 
 
-# ============================================================
-# 8. Train model
-# ============================================================
-
 print("\n========== TRAINING MODEL ==========")
 
 pipeline.fit(X_train, y_train)
@@ -126,9 +94,6 @@ pipeline.fit(X_train, y_train)
 print("Training complete!")
 
 
-# ============================================================
-# 9. Get probability predictions
-# ============================================================
 #
 # IMPORTANT:
 #
@@ -143,16 +108,11 @@ print("Training complete!")
 #
 # We need probability because we want to test
 # different thresholds.
-# ============================================================
 
 probabilities = pipeline.predict_proba(X_test)
 
 abuse_probabilities = probabilities[:, 1]
 
-
-# ============================================================
-# 10. Evaluate different thresholds
-# ============================================================
 
 thresholds = np.arange(
     0.10,

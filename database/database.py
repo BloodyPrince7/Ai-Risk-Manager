@@ -1,17 +1,11 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
-# ============================================================
-# Database configuration
-# ============================================================
+DATABASE_URL = os.getenv("RISK_DATABASE_URL", "sqlite:///./risk_manager.db")
 
-DATABASE_URL = "sqlite:///./risk_manager.db"
-
-
-# ============================================================
-# Database engine
-# ============================================================
 
 engine = create_engine(
     DATABASE_URL,
@@ -21,10 +15,6 @@ engine = create_engine(
 )
 
 
-# ============================================================
-# Session factory
-# ============================================================
-
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
@@ -32,16 +22,8 @@ SessionLocal = sessionmaker(
 )
 
 
-# ============================================================
-# Base class for database models
-# ============================================================
-
 Base = declarative_base()
 
-
-# ============================================================
-# Database dependency
-# ============================================================
 
 def get_db():
 

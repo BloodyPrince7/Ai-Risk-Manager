@@ -1,7 +1,4 @@
 
-# ============================================================
-# AI Risk Manager — Decision Engine
-# ============================================================
 #
 # The ML model answers:
 #
@@ -13,20 +10,11 @@
 #
 # Keeping these two responsibilities separate makes our
 # architecture easier to test and modify.
-# ============================================================
 
-
-# ============================================================
-# Risk thresholds
-# ============================================================
 
 LOW_RISK_THRESHOLD = 0.20
 HIGH_RISK_THRESHOLD = 0.60
 
-
-# ============================================================
-# Main decision function
-# ============================================================
 
 def make_decision(risk_probability, thresholds=None):
     """
@@ -56,19 +44,12 @@ def make_decision(risk_probability, thresholds=None):
             "Decision thresholds must satisfy 0 <= low < high <= 1."
         )
 
-    # --------------------------------------------------------
-    # Validate probability
-    # --------------------------------------------------------
 
     if not 0 <= risk_probability <= 1:
         raise ValueError(
             "Risk probability must be between 0 and 1."
         )
 
-
-    # --------------------------------------------------------
-    # LOW RISK
-    # --------------------------------------------------------
 
     if risk_probability < low_threshold:
 
@@ -87,10 +68,6 @@ def make_decision(risk_probability, thresholds=None):
             )
         }
 
-
-    # --------------------------------------------------------
-    # MEDIUM RISK
-    # --------------------------------------------------------
 
     if risk_probability < high_threshold:
 
@@ -111,10 +88,6 @@ def make_decision(risk_probability, thresholds=None):
         }
 
 
-    # --------------------------------------------------------
-    # HIGH RISK
-    # --------------------------------------------------------
-
     return {
         "risk_score": float(
     round(
@@ -130,10 +103,6 @@ def make_decision(risk_probability, thresholds=None):
         )
     }
 
-
-# ============================================================
-# Test the Decision Engine
-# ============================================================
 
 if __name__ == "__main__":
 

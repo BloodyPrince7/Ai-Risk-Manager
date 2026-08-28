@@ -7,16 +7,8 @@ from google import genai
 from .prompts import SYSTEM_PROMPT
 
 
-# ============================================================
-# Load environment variables
-# ============================================================
-
 load_dotenv()
 
-
-# ============================================================
-# Gemini configuration
-# ============================================================
 
 GEMINI_API_KEY = os.getenv(
     "GEMINI_API_KEY"
@@ -33,16 +25,8 @@ client = genai.Client(
 )
 
 
-# ============================================================
-# Model
-# ============================================================
-
 MODEL_NAME = "gemini-3.6-flash"
 
-
-# ============================================================
-# Investigator
-# ============================================================
 
 def investigate_case(case):
     """
@@ -59,9 +43,6 @@ def investigate_case(case):
         Structured AI investigation.
     """
 
-    # --------------------------------------------------------
-    # Convert case into readable JSON
-    # --------------------------------------------------------
 
     case_json = json.dumps(
         case,
@@ -69,10 +50,6 @@ def investigate_case(case):
         default=str
     )
 
-
-    # --------------------------------------------------------
-    # Build investigation prompt
-    # --------------------------------------------------------
 
     prompt = f"""
 {SYSTEM_PROMPT}
@@ -89,26 +66,16 @@ Return ONLY valid JSON.
 """
 
 
-    # --------------------------------------------------------
-    # Ask Gemini
-    # --------------------------------------------------------
-
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=prompt
     )
 
 
-    # --------------------------------------------------------
-    # Extract response
-    # --------------------------------------------------------
-
     text = response.text.strip()
 
 
-    # --------------------------------------------------------
     # Remove markdown code fences if Gemini adds them
-    # --------------------------------------------------------
 
     if text.startswith("```json"):
         text = text[7:]
@@ -124,10 +91,6 @@ Return ONLY valid JSON.
     text = text.strip()
 
 
-    # --------------------------------------------------------
-    # Convert JSON → Python dictionary
-    # --------------------------------------------------------
-
     try:
 
         result = json.loads(text)
@@ -138,10 +101,6 @@ Return ONLY valid JSON.
             "Gemini returned invalid JSON."
         ) from error
 
-
-    # --------------------------------------------------------
-    # Basic validation
-    # --------------------------------------------------------
 
     required_fields = [
         "summary",
@@ -160,10 +119,6 @@ Return ONLY valid JSON.
                 f"Missing field from Gemini response: {field}"
             )
 
-
-    # --------------------------------------------------------
-    # Validate confidence
-    # --------------------------------------------------------
 
     confidence = float(
         result["confidence"]

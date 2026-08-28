@@ -16,34 +16,18 @@ from sklearn.metrics import (
 from xgboost import XGBClassifier
 
 
-# ============================================================
-# 1. Merchant cost assumptions
-# ============================================================
-
 FALSE_POSITIVE_COST = 100
 FALSE_NEGATIVE_COST = 1500
 
-
-# ============================================================
-# 2. Load dataset
-# ============================================================
 
 DATA_PATH = "data/raw/return_abuse_dataset.csv"
 
 df = pd.read_csv(DATA_PATH)
 
 
-# ============================================================
-# 3. Separate features and target
-# ============================================================
-
 X = df.drop("is_abuse", axis=1)
 y = df["is_abuse"]
 
-
-# ============================================================
-# 4. Feature definitions
-# ============================================================
 
 categorical_features = [
     "claim_type",
@@ -66,10 +50,6 @@ numerical_features = [
 ]
 
 
-# ============================================================
-# 5. Train/Test Split
-# ============================================================
-
 X_train, X_test, y_train, y_test = train_test_split(
     X,
     y,
@@ -78,10 +58,6 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
-
-# ============================================================
-# 6. Preprocessing
-# ============================================================
 
 preprocessor = ColumnTransformer(
     transformers=[
@@ -95,10 +71,6 @@ preprocessor = ColumnTransformer(
 )
 
 
-# ============================================================
-# 7. Model
-# ============================================================
-
 model = XGBClassifier(
     n_estimators=300,
     max_depth=5,
@@ -111,10 +83,6 @@ model = XGBClassifier(
 )
 
 
-# ============================================================
-# 8. Pipeline
-# ============================================================
-
 pipeline = Pipeline(
     steps=[
         ("preprocessor", preprocessor),
@@ -123,10 +91,6 @@ pipeline = Pipeline(
 )
 
 
-# ============================================================
-# 9. Train
-# ============================================================
-
 print("\n========== TRAINING MODEL ==========")
 
 pipeline.fit(X_train, y_train)
@@ -134,18 +98,10 @@ pipeline.fit(X_train, y_train)
 print("Training complete!")
 
 
-# ============================================================
-# 10. Get abuse probabilities
-# ============================================================
-
 probabilities = pipeline.predict_proba(X_test)
 
 abuse_probabilities = probabilities[:, 1]
 
-
-# ============================================================
-# 11. Analyze thresholds
-# ============================================================
 
 thresholds = np.arange(
     0.10,
@@ -222,10 +178,6 @@ for threshold in thresholds:
         f"₹{total_cost:<14,.0f}"
     )
 
-
-# ============================================================
-# 12. Find minimum-cost threshold
-# ============================================================
 
 results_df = pd.DataFrame(results)
 

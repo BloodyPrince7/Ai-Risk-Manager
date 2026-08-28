@@ -27,9 +27,7 @@ button {
   background: #0b0d0f;
 }
 
-/* =========================================================
-   SIDEBAR
-   ========================================================= */
+/* Sidebar */
 
 .sidebar {
   width: 250px;
@@ -159,9 +157,7 @@ nav {
   font-size: 10px;
 }
 
-/* =========================================================
-   MAIN
-   ========================================================= */
+/* Main */
 
 .main {
   flex: 1;
@@ -241,9 +237,7 @@ nav {
   font-weight: 700;
 }
 
-/* =========================================================
-   STATS
-   ========================================================= */
+/* Stats */
 
 .stats-grid {
   display: grid;
@@ -324,9 +318,7 @@ nav {
   color: #70b78c;
 }
 
-/* =========================================================
-   CONTENT CARD
-   ========================================================= */
+/* Content card */
 
 .content-card {
   background: #111417;
@@ -377,9 +369,7 @@ nav {
   color: #fff;
 }
 
-/* =========================================================
-   TABLE
-   ========================================================= */
+/* Table */
 
 .table-wrapper {
   overflow-x: auto;
@@ -463,9 +453,7 @@ td small {
   color: #e2c58d;
 }
 
-/* =========================================================
-   RISK BADGES
-   ========================================================= */
+/* Risk badges */
 
 .risk-badge {
   display: inline-flex;
@@ -519,9 +507,7 @@ td small {
   background: #d9877d;
 }
 
-/* =========================================================
-   EMPTY
-   ========================================================= */
+/* Empty */
 
 .empty-state {
   min-height: 280px;
@@ -571,9 +557,7 @@ td small {
   font-size: 20px;
 }
 
-/* =========================================================
-   BOTTOM CARDS
-   ========================================================= */
+/* Bottom cards */
 
 .bottom-grid {
   display: grid;
@@ -667,9 +651,7 @@ td small {
   font-size: 11px;
 }
 
-/* =========================================================
-   CASE PANEL
-   ========================================================= */
+/* Case panel */
 
 .panel-overlay {
   position: fixed;
@@ -935,9 +917,7 @@ td small {
   letter-spacing: 0.1em;
 }
 
-/* =========================================================
-   RESPONSIVE
-   ========================================================= */
+/* Responsive */
 
 @media (max-width: 1000px) {
 
@@ -985,9 +965,7 @@ td small {
   }
 }
 
-/* =========================================================
-   GEMINI AI INVESTIGATION
-   ========================================================= */
+/* Gemini ai investigation */
 .ai-investigation { margin-top:20px; background:#0e1113; border:1px solid #343a40; border-radius:10px; overflow:hidden; }
 .ai-header { display:flex; align-items:center; justify-content:space-between; padding:17px; background:#15191c; border-bottom:1px solid #292f34; }
 .ai-title { display:flex; align-items:center; gap:11px; }
@@ -1030,9 +1008,7 @@ td small {
 .rerun-button:hover { background:#181c20; color:#b8bec2; }
 @media (max-width:700px) { .case-panel { padding:20px; } .ai-investigation { margin-top:16px; } }
 
-/* =========================================================
-   CUSTOM TRAINING & TEST CASE
-   ========================================================= */
+/* Custom training & test case */
 .header-actions { display:flex; align-items:center; gap:9px; }
 .primary-button,.secondary-button { display:inline-flex; align-items:center; justify-content:center; border-radius:7px; padding:9px 13px; cursor:pointer; font-size:10px; font-weight:650; }
 .primary-button { border:1px solid #d7c8aa; background:#e9e2d3; color:#151719; }
@@ -1094,9 +1070,7 @@ td small {
 @media (max-width:900px) { .settings-grid { grid-template-columns:1fr; } .schema-card { grid-template-columns:1fr; } .schema-card>p { grid-column:1; } }
 @media (max-width:700px) { .header-actions { flex-wrap:wrap; justify-content:flex-end; } .test-form-grid,.data-rules { grid-template-columns:1fr; } .result-metrics { grid-template-columns:1fr 1fr; } }
 
-/* =========================================================
-   MODEL EVALUATION & HUMAN DECISIONS
-   ========================================================= */
+/* Model evaluation & human decisions */
 .model-title-row,.evaluation-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:15px; }
 .source-badge { flex:0 0 auto; padding:5px 7px; border-radius:5px; font-size:8px; font-weight:750; letter-spacing:.08em; }
 .source-badge.synthetic { border:1px solid #66522d; background:#211d15; color:#d3ad62; }
@@ -1135,9 +1109,7 @@ td small {
 @media (max-width:900px) { .evaluation-content { grid-template-columns:1fr; } }
 @media (max-width:600px) { .confusion-matrix { grid-template-columns:65px 1fr 1fr; } .decision-actions { grid-template-columns:1fr; } }
 
-/* =========================================================
-   BUSINESS IMPACT, EXPLANATIONS & EVIDENCE
-   ========================================================= */
+/* Business impact, explanations & evidence */
 .impact-comparison { display:grid; grid-template-columns:repeat(3,1fr) minmax(210px,1.2fr); gap:8px; margin-top:18px; padding-top:18px; border-top:1px solid #252a2f; }
 .feedback-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; margin-bottom:14px; overflow:hidden; border:1px solid #252a2f; border-radius:10px; background:#252a2f; }
 .feedback-strip>div { padding:13px 16px; background:#111417; }
@@ -1273,9 +1245,7 @@ td small {
 @media (max-width:1000px) { .order-summary-grid { grid-template-columns:1fr 1fr; } .order-action-grid { grid-template-columns:1fr 1fr; } .order-action-grid>div:nth-child(2) { border-right:0; } .order-action-grid>div:nth-child(-n+2) { border-bottom:1px solid #2c3236; } }
 @media (max-width:650px) { .impact-comparison,.cost-inputs,.feedback-strip,.order-summary-grid { grid-template-columns:1fr; } .outcome-form>div { grid-template-columns:1fr; } .contribution-list>div { grid-template-columns:110px 1fr 45px; } .evidence-row { grid-template-columns:1fr; } .orders-toolbar,.shopping-order-card>footer { align-items:flex-start; flex-direction:column; } .shopping-order-body { grid-template-columns:52px 1fr; } .product-tile { width:52px; height:52px; }.order-price { grid-column:1 / -1; text-align:left; }.order-action-grid { grid-template-columns:1fr; }.order-action-grid>div { border-right:0; border-bottom:1px solid #2c3236; }.order-action-grid>div:last-child { border-bottom:0; } }
 
-/* =========================================================
-   ANALYTICS & UI POLISH
-   ========================================================= */
+/* Analytics & ui polish */
 .sidebar { position:sticky; top:0; height:100vh; }
 .main { min-width:0; }
 .page-description { margin:5px 0 0; color:#687178; font-size:10px; }
@@ -1337,9 +1307,7 @@ td small {
 @media (max-width:700px) { .donut-content { gap:20px; } .donut { width:110px; height:110px; } .chart-card { min-height:235px; } }
 @media (max-width:480px) { .donut-content { align-items:stretch; flex-direction:column; gap:8px; padding-top:18px; } .donut { margin:auto; } .histogram { gap:5px; padding-inline:0; } .curve-summary { grid-template-columns:1fr; } }
 
-/* =========================================================
-   READABILITY SCALE
-   ========================================================= */
+/* Readability scale */
 .brand h1 { font-size:17px; }
 .brand span { font-size:11px; }
 .nav-item { font-size:14px; }

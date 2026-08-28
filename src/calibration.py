@@ -17,26 +17,14 @@ from sklearn.calibration import calibration_curve
 from xgboost import XGBClassifier
 
 
-# ============================================================
-# 1. Load dataset
-# ============================================================
-
 DATA_PATH = "data/raw/return_abuse_dataset.csv"
 
 df = pd.read_csv(DATA_PATH)
 
 
-# ============================================================
-# 2. Separate features and target
-# ============================================================
-
 X = df.drop("is_abuse", axis=1)
 y = df["is_abuse"]
 
-
-# ============================================================
-# 3. Feature definitions
-# ============================================================
 
 categorical_features = [
     "claim_type",
@@ -59,10 +47,6 @@ numerical_features = [
 ]
 
 
-# ============================================================
-# 4. Train/Test Split
-# ============================================================
-
 X_train, X_test, y_train, y_test = train_test_split(
     X,
     y,
@@ -71,10 +55,6 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
-
-# ============================================================
-# 5. Preprocessing
-# ============================================================
 
 preprocessor = ColumnTransformer(
     transformers=[
@@ -88,10 +68,6 @@ preprocessor = ColumnTransformer(
 )
 
 
-# ============================================================
-# 6. XGBoost model
-# ============================================================
-
 model = XGBClassifier(
     n_estimators=300,
     max_depth=5,
@@ -104,10 +80,6 @@ model = XGBClassifier(
 )
 
 
-# ============================================================
-# 7. Pipeline
-# ============================================================
-
 pipeline = Pipeline(
     steps=[
         ("preprocessor", preprocessor),
@@ -116,10 +88,6 @@ pipeline = Pipeline(
 )
 
 
-# ============================================================
-# 8. Train
-# ============================================================
-
 print("\n========== TRAINING MODEL ==========")
 
 pipeline.fit(X_train, y_train)
@@ -127,18 +95,11 @@ pipeline.fit(X_train, y_train)
 print("Training complete!")
 
 
-# ============================================================
-# 9. Get probabilities
-# ============================================================
-
 probabilities = pipeline.predict_proba(X_test)
 
 abuse_probabilities = probabilities[:, 1]
 
 
-# ============================================================
-# 10. Brier Score
-# ============================================================
 #
 # Brier score measures how close predicted probabilities
 # are to the actual outcomes.
@@ -146,7 +107,6 @@ abuse_probabilities = probabilities[:, 1]
 # Lower = better
 #
 # Perfect score = 0
-# ============================================================
 
 brier = brier_score_loss(
     y_test,
@@ -161,16 +121,12 @@ print(
 )
 
 
-# ============================================================
-# 11. ROC-AUC
-# ============================================================
 #
 # ROC-AUC measures how well the model ranks abusive
 # cases above legitimate cases.
 #
 # 1.0 = perfect ranking
 # 0.5 = random ranking
-# ============================================================
 
 auc = roc_auc_score(
     y_test,
@@ -183,9 +139,6 @@ print(
 )
 
 
-# ============================================================
-# 12. Calibration curve
-# ============================================================
 #
 # We divide predictions into probability bins.
 #
@@ -195,7 +148,6 @@ print(
 # Actual abuse rate = 0.76
 #
 # That's reasonably calibrated.
-# ============================================================
 
 prob_true, prob_pred = calibration_curve(
     y_test,
@@ -222,10 +174,6 @@ for predicted, actual in zip(
         f"{actual:<15.3f}"
     )
 
-
-# ============================================================
-# 13. Calibration interpretation
-# ============================================================
 
 print("\n========== INTERPRETATION ==========")
 
