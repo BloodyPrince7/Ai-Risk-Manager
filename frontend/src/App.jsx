@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
+import "./Storefront.css";
 
 const API_URL = "http://127.0.0.1:8000";
 
 function App() {
+  const isStorefront = window.location.pathname.startsWith("/store");
+  useEffect(() => { document.title = isStorefront ? "My Orders | Velora" : "AI Risk Manager"; }, [isStorefront]);
+  return isStorefront ? <StorefrontApp /> : <RiskManagerApp />;
+}
+
+function RiskManagerApp() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCase, setSelectedCase] = useState(null);
@@ -113,12 +120,116 @@ function App() {
   );
 }
 
+function StorefrontApp() {
+  const [cases, setCases] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [now, setNow] = useState(Date.now());
+
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/cases`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Could not load orders.");
+      setCases(data.cases || []); setError("");
+    } catch (loadError) { setError(loadError.message); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const poll = window.setInterval(refresh, 3000);
+    const clock = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => { window.clearInterval(poll); window.clearInterval(clock); };
+  }, [refresh]);
+
+  async function decide(caseId, decision) {
+    const response = await fetch(`${API_URL}/cases/${caseId}/decision`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "The decision could not be changed.");
+    await refresh();
+  }
+
+  async function deleteOrder(caseId) {
+    const response = await fetch(`${API_URL}/cases/${caseId}`, { method: "DELETE" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "The order could not be deleted.");
+    setCases((current) => current.filter((item) => item.id !== caseId));
+  }
+
+  return <OrdersPage cases={cases} loading={loading} error={error} now={now} onRefresh={refresh} onDecision={decide} onDelete={deleteOrder} />;
+}
+
+function OrdersPage({ cases, loading, error, now, onRefresh, onDecision, onDelete }) {
+  const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const [risk, setRisk] = useState("all");
+  const orders = cases.map((item) => ({ ...item, orderState: getOrderState(item, now) }));
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = orders.filter((item) => {
+    const searchable = [item.external_reference, item.id, item.claim_type, item.product_category, productName(item.product_category), item.orderState.label].join(" ").toLowerCase();
+    return (filter === "all" || item.orderState.group === filter)
+      && (category === "all" || item.product_category?.toLowerCase() === category)
+      && (risk === "all" || item.risk_level?.toLowerCase() === risk)
+      && (!normalizedQuery || searchable.includes(normalizedQuery));
+  });
+  const hasFilters = filter !== "all" || category !== "all" || risk !== "all" || normalizedQuery;
+  function clearFilters() { setFilter("all"); setQuery(""); setCategory("all"); setRisk("all"); }
+  return <div className="commerce-site">
+    <header className="commerce-header"><a className="commerce-brand" href="/store"><span>V</span><div><strong>VELORA</strong><small>MODERN COMMERCE</small></div></a><nav><a href="#orders">My Orders</a><a href="#returns">Returns</a><a href="/">Risk Manager</a></nav><div className="commerce-user">PM</div></header>
+    <section className="commerce-hero"><div><span>ORDER CENTRE</span><h1>Your orders, clearly updated.</h1><p>Track refund payment windows and review final decisions in real time.</p></div><button onClick={onRefresh}>Refresh orders ↻</button></section>
+    <main className="commerce-main" id="orders">
+      <div className="commerce-title"><div><span>ORDER HISTORY</span><h2>Returns & refunds</h2></div><div className="commerce-count">{visible.length} of {orders.length} orders</div></div>
+      <div className="commerce-search-row"><label className="commerce-search"><span>⌕</span><input aria-label="Search orders" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search order ID, product, claim or status" /></label><select aria-label="Filter by category" value={category} onChange={(event) => setCategory(event.target.value)}><option value="all">All categories</option><option value="electronics">Electronics</option><option value="fashion">Fashion</option><option value="home">Home</option><option value="beauty">Beauty</option><option value="grocery">Grocery</option></select><select aria-label="Filter by risk" value={risk} onChange={(event) => setRisk(event.target.value)}><option value="all">All risk levels</option><option value="low">Low risk</option><option value="medium">Medium risk</option><option value="high">High risk</option></select>{hasFilters && <button className="commerce-clear" onClick={clearFilters}>Clear filters</button>}</div>
+      <div className="commerce-filters">{[["all","All"],["scheduled","Payment scheduled"],["approved","Approved"],["rejected","Rejected"],["review","Under review"]].map(([value,label]) => <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}</button>)}</div>
+      {error && <div className="commerce-error">{error}</div>}
+      {loading ? <div className="commerce-empty">Loading your orders…</div> : visible.length === 0 ? <div className="commerce-empty"><strong>No matching orders</strong><span>Change your search or filters to continue.</span></div> : <div className="commerce-orders">{visible.map((order) => <ShoppingOrderCard key={order.id} order={order} onDecision={onDecision} onDelete={onDelete} />)}</div>}
+    </main>
+    <footer className="commerce-footer"><strong>VELORA</strong><span>Secure commerce demo · Live order decisions</span></footer>
+  </div>;
+}
+
+function ShoppingOrderCard({ order, onDecision, onDelete }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const state = order.orderState;
+  async function decide(decision) { setSaving(true); setError(""); try { await onDecision(order.id, decision); } catch (decisionError) { setError(decisionError.message); } finally { setSaving(false); } }
+  async function remove() { if (!window.confirm(`Permanently delete order ${order.external_reference || order.id}? This cannot be undone.`)) return; setSaving(true); setError(""); try { await onDelete(order.id); } catch (deleteError) { setError(deleteError.message); setSaving(false); } }
+  return <article className="commerce-order-card">
+    <header><div><span>ORDER ID</span><strong>{order.external_reference || `VL-${String(order.id).padStart(6,"0")}`}</strong><small>Placed {formatDate(order.created_at)}</small></div><div className="commerce-card-actions"><span className={`commerce-status ${state.tone}`}><i></i>{state.label}</span><button disabled={saving} className="commerce-delete" onClick={remove} aria-label={`Delete order ${order.external_reference || order.id}`}>Delete</button></div></header>
+    <div className="commerce-product"><div className={`commerce-product-image ${order.product_category?.toLowerCase()}`}>{productIcon(order.product_category)}</div><div className="commerce-product-copy"><span>{formatClaim(order.product_category)}</span><h3>{productName(order.product_category)}</h3><p>{formatClaim(order.claim_type)} return · Qty 1</p></div><div className="commerce-price"><span>Order total</span><strong>{formatCurrency(order.order_value)}</strong></div></div>
+    <div className={`commerce-decision ${state.tone}`}><div><span>{state.eyebrow}</span><strong>{state.headline}</strong><p>{state.detail}</p></div>{state.countdown && <div className="commerce-countdown"><small>PAYMENT IN</small><strong>{state.countdown}</strong></div>}</div>
+    {state.canOverride && <div className="commerce-controls"><div><strong>Change this decision?</strong><span>You can approve immediately or stop payment before the timer ends.</span></div><div><button disabled={saving} className="commerce-reject" onClick={() => decide("REJECTED")}>Reject return</button><button disabled={saving} className="commerce-approve" onClick={() => decide("APPROVED")}>Approve now</button></div></div>}
+    {error && <div className="commerce-card-error">{error}</div>}
+  </article>;
+}
+
+function getOrderState(order, now) {
+  if (order.merchant_decision === "REJECTED") return { label:"Rejected", tone:"danger", group:"rejected", eyebrow:"FINAL DECISION", headline:"Return rejected", detail:"The refund payment has been stopped." };
+  if (order.merchant_decision === "APPROVED") return { label:"Approved", tone:"success", group:"approved", eyebrow:"FINAL DECISION", headline:"Refund approved", detail:"A reviewer approved this return before the payment window closed." };
+  if (order.system_decision === "AUTO_APPROVED") return { label:"Auto approved", tone:"success", group:"approved", eyebrow:"PAYMENT APPROVED", headline:"Refund is being processed", detail:"The review window ended without a change, so payment was approved automatically." };
+  if (order.system_decision === "PENDING_AUTO_APPROVAL" && order.decision_due_at) { const remaining = Math.max(0, new Date(order.decision_due_at).getTime() - now); return { label:"Payment scheduled", tone:"scheduled", group:"scheduled", eyebrow:"RETURN ACCEPTED", headline:"Refund payment scheduled", detail:"Review this order before payment is released.", countdown:formatCountdown(remaining), canOverride:remaining > 0 }; }
+  if (order.system_decision === "EVIDENCE_REQUIRED") return { label:"Evidence requested", tone:"warning", group:"review", eyebrow:"RETURN REVIEW", headline:"More information required", detail:"Evidence is required before this refund can be approved." };
+  return { label:"Under review", tone:"warning", group:"review", eyebrow:"RETURN REVIEW", headline:"Decision in progress", detail:"A reviewer is checking this return request." };
+}
+
+function formatCountdown(milliseconds) { const total = Math.max(0, Math.ceil(milliseconds / 1000)); const hours = Math.floor(total / 3600); const minutes = Math.floor((total % 3600) / 60); const seconds = total % 60; return `${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}`; }
+
+function productName(category) { return { electronics:"Wireless Noise-Cancelling Headphones", fashion:"Premium Everyday Jacket", home:"Artisan Table Lamp", beauty:"Essential Skincare Collection", grocery:"Curated Pantry Box" }[category?.toLowerCase()] || "Everyday Essential"; }
+
+function productIcon(category) {
+  return { electronics: "⌁", fashion: "◇", home: "⌂", beauty: "✦", grocery: "▦" }[category?.toLowerCase()] || "□";
+}
+
 function Overview({ cases, loading, fetchCases, onView, onTest, highRisk, mediumRisk, lowRisk, modelInfo, feedback }) {
   const metrics = modelInfo?.metrics;
   const thresholds = modelInfo?.routing_thresholds;
   const matrix = modelInfo?.confusion_matrix;
   const costs = modelInfo?.cost_analysis;
   const impact = modelInfo?.business_impact;
+  const queueCases = cases.filter((item) => !["APPROVED", "REJECTED"].includes(item.merchant_decision) && item.system_decision !== "AUTO_APPROVED");
+  const completedCases = cases.length - queueCases.length;
   return <>
     <section className="stats-grid">
       <StatCard title="Total Cases" value={cases.length} subtitle="All return requests" type="neutral" />
@@ -130,10 +241,10 @@ function Overview({ cases, loading, fetchCases, onView, onTest, highRisk, medium
     <AnalyticsSection cases={cases} highRisk={highRisk} mediumRisk={mediumRisk} lowRisk={lowRisk} modelInfo={modelInfo} />
     <section className="content-card" id="recent-cases">
       <div className="card-header">
-        <div><p className="eyebrow">LIVE QUEUE</p><h3>Recent Risk Cases</h3></div>
+        <div><p className="eyebrow">LIVE QUEUE</p><h3>Active Risk Cases</h3><span className="queue-caption">{queueCases.length} active · {completedCases} completed in commerce history</span></div>
         <div className="header-actions"><button className="refresh-button" onClick={fetchCases}>↻ Refresh</button><button className="primary-button" onClick={onTest}>＋ Test a case</button></div>
       </div>
-      {loading ? <div className="empty-state">Loading risk cases...</div> : cases.length === 0 ? <div className="empty-state"><div className="empty-icon">◌</div><h3>No cases yet</h3><p>Test a return-risk case to see it here.</p><button className="primary-button" onClick={onTest}>Test your first case</button></div> : <div className="table-wrapper"><table><thead><tr><th>CASE</th><th>RISK SCORE</th><th>LEVEL</th><th>CLAIM</th><th>ORDER VALUE</th><th>ACTION</th><th></th></tr></thead><tbody>{cases.map((item) => <tr key={item.id}><td><strong>#{String(item.id).padStart(4, "0")}</strong><small>{formatDate(item.created_at)}</small></td><td><strong className="score">{Number(item.risk_score).toFixed(1)}%</strong></td><td><RiskBadge level={item.risk_level} /></td><td>{formatClaim(item.claim_type)}</td><td>₹{Number(item.order_value).toLocaleString()}</td><td><span className="action-text">{formatAction(item.recommended_action)}</span></td><td><button className="view-button" onClick={() => onView(item.id)}>View →</button></td></tr>)}</tbody></table></div>}
+      {loading ? <div className="empty-state">Loading risk cases...</div> : queueCases.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><h3>Risk queue cleared</h3><p>There are no unresolved cases. Completed decisions remain visible on the separate storefront at /store.</p><button className="primary-button" onClick={onTest}>Test a new case</button></div> : <div className="table-wrapper"><table><thead><tr><th>CASE</th><th>RISK SCORE</th><th>LEVEL</th><th>CLAIM</th><th>ORDER VALUE</th><th>ACTION</th><th>QUEUE STATUS</th><th></th></tr></thead><tbody>{queueCases.map((item) => <tr key={item.id}><td><strong>#{String(item.id).padStart(4, "0")}</strong><small>{formatDate(item.created_at)}</small></td><td><strong className="score">{Number(item.risk_score).toFixed(1)}%</strong></td><td><RiskBadge level={item.risk_level} /></td><td>{formatClaim(item.claim_type)}</td><td>₹{Number(item.order_value).toLocaleString()}</td><td><span className="action-text">{formatAction(item.recommended_action)}</span></td><td><span className={`queue-status ${item.merchant_decision === "ESCALATED" ? "escalated" : "pending"}`}>{item.merchant_decision === "ESCALATED" ? "Escalated" : "Awaiting decision"}</span></td><td><button className="view-button" onClick={() => onView(item.id)}>Review →</button></td></tr>)}</tbody></table></div>}
     </section>
     <section className="bottom-grid">
       <div className="info-card"><div className="model-title-row"><div><p className="eyebrow">MODEL</p><h3>XGBoost Risk Engine</h3></div><span className={`source-badge ${modelInfo?.model_source === "merchant_trained" ? "merchant" : "synthetic"}`}>{modelInfo?.model_source === "merchant_trained" ? "MERCHANT-TRAINED" : "SYNTHETIC DATA"}</span></div><p>{modelInfo?.model_source === "merchant_trained" ? `Trained from ${modelInfo.dataset_name}.` : "Baseline trained from reproducible synthetic return cases; not real merchant history."}</p><div className="model-metrics"><div><span>ROC-AUC</span><strong>{metrics ? metrics.roc_auc.toFixed(4) : "—"}</strong></div><div><span>Precision</span><strong>{metrics ? `${(metrics.precision * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Recall</span><strong>{metrics ? `${(metrics.recall * 100).toFixed(1)}%` : "—"}</strong></div></div></div>
@@ -270,8 +381,8 @@ function CostSettingsCard({ modelInfo, onUpdated }) {
 
 function Metric({ label, value, percent }) { return <div><span>{label}</span><strong>{percent ? `${(value * 100).toFixed(1)}%` : value.toFixed(4)}</strong></div>; }
 
-const LOW_RISK_SAMPLE = { customer_age_days: 700, previous_orders: 15, previous_returns: 1, previous_refunds: 0, return_ratio: 0.067, refund_ratio: 0, order_value: 1800, days_since_purchase: 12, account_count: 1, address_reuse_count: 1, device_reuse_count: 1, payment_failures: 0, claim_type: "changed_mind", product_category: "grocery" };
-const HIGH_RISK_SAMPLE = { customer_age_days: 30, previous_orders: 4, previous_returns: 3, previous_refunds: 2, return_ratio: 0.75, refund_ratio: 0.5, order_value: 8500, days_since_purchase: 3, account_count: 3, address_reuse_count: 4, device_reuse_count: 5, payment_failures: 2, claim_type: "missing_item", product_category: "electronics" };
+const LOW_RISK_SAMPLE = { external_reference: "ORDER-DEMO-LOW", customer_age_days: 700, previous_orders: 15, previous_returns: 1, previous_refunds: 0, return_ratio: 0.067, refund_ratio: 0, order_value: 1800, days_since_purchase: 12, account_count: 1, address_reuse_count: 1, device_reuse_count: 1, payment_failures: 0, claim_type: "changed_mind", product_category: "grocery" };
+const HIGH_RISK_SAMPLE = { external_reference: "ORDER-DEMO-HIGH", customer_age_days: 30, previous_orders: 4, previous_returns: 3, previous_refunds: 2, return_ratio: 0.75, refund_ratio: 0.5, order_value: 8500, days_since_purchase: 3, account_count: 3, address_reuse_count: 4, device_reuse_count: 5, payment_failures: 2, claim_type: "missing_item", product_category: "electronics" };
 const NUMBER_FIELDS = [["customer_age_days", "Customer age (days)"], ["previous_orders", "Previous orders"], ["previous_returns", "Previous returns"], ["previous_refunds", "Previous refunds"], ["return_ratio", "Return ratio (0–1)"], ["refund_ratio", "Refund ratio (0–1)"], ["order_value", "Order value (₹)"], ["days_since_purchase", "Days since purchase"], ["account_count", "Linked accounts"], ["address_reuse_count", "Address reuse"], ["device_reuse_count", "Device reuse"], ["payment_failures", "Payment failures"]];
 
 function TestCasePanel({ onClose, onCreated }) {
@@ -292,10 +403,11 @@ function TestCasePanel({ onClose, onCreated }) {
   async function submit(event) {
     event.preventDefault(); setSubmitting(true); setError("");
     const payload = Object.fromEntries(Object.entries(form).map(([key, value]) => NUMBER_FIELDS.some(([name]) => name === key) ? [key, Number(value)] : [key, value]));
+    if (!payload.external_reference?.trim()) delete payload.external_reference;
     try { const response = await fetch(`${API_URL}/cases`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await response.json(); if (!response.ok) throw new Error(data.detail?.[0]?.msg || data.detail || "Could not score case."); await onCreated(data.case.id); }
     catch (submitError) { setError(submitError.message); } finally { setSubmitting(false); }
   }
-  return <div className="panel-overlay"><div className="case-panel test-panel"><div className="panel-header"><div><p className="eyebrow">ACTIVE MODEL</p><h2>Test a risk case</h2></div><button className="close-button" onClick={onClose}>×</button></div><div className="sample-switch"><span>Quick sample</span><button onClick={() => setForm(LOW_RISK_SAMPLE)}>Low risk</button><button onClick={() => setForm(HIGH_RISK_SAMPLE)}>High risk</button></div><form onSubmit={submit}><div className="test-form-grid">{NUMBER_FIELDS.map(([name, label]) => <label key={name}><span>{label}</span><input required readOnly={name.includes("ratio")} min={["previous_orders", "account_count"].includes(name) ? "1" : "0"} max={name.includes("ratio") ? "1" : undefined} step={name.includes("ratio") || name === "order_value" ? "0.001" : "1"} type="number" value={form[name]} onChange={(event) => update(name, event.target.value)} /></label>)}<label><span>Claim type</span><select value={form.claim_type} onChange={(event) => update("claim_type", event.target.value)}><option value="changed_mind">Changed mind</option><option value="damaged">Damaged</option><option value="missing_item">Missing item</option><option value="wrong_item">Wrong item</option></select></label><label><span>Product category</span><input required value={form.product_category} onChange={(event) => update("product_category", event.target.value)} /></label></div>{error && <div className="form-message error"><strong>Case could not be tested</strong><span>{error}</span></div>}<div className="form-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={submitting}>{submitting ? "Scoring case…" : "Run risk test →"}</button></div></form></div></div>;
+  return <div className="panel-overlay"><div className="case-panel test-panel"><div className="panel-header"><div><p className="eyebrow">ACTIVE MODEL</p><h2>Test a risk case</h2></div><button className="close-button" onClick={onClose}>×</button></div><div className="sample-switch"><span>Quick sample</span><button onClick={() => setForm(LOW_RISK_SAMPLE)}>Low risk</button><button onClick={() => setForm(HIGH_RISK_SAMPLE)}>High risk</button></div><form onSubmit={submit}><div className="test-form-grid"><label><span>Merchant order/reference</span><input value={form.external_reference || ""} maxLength="200" onChange={(event) => update("external_reference", event.target.value)} /></label>{NUMBER_FIELDS.map(([name, label]) => <label key={name}><span>{label}</span><input required readOnly={name.includes("ratio")} min={["previous_orders", "account_count"].includes(name) ? "1" : "0"} max={name.includes("ratio") ? "1" : undefined} step={name.includes("ratio") || name === "order_value" ? "0.001" : "1"} type="number" value={form[name]} onChange={(event) => update(name, event.target.value)} /></label>)}<label><span>Claim type</span><select value={form.claim_type} onChange={(event) => update("claim_type", event.target.value)}><option value="changed_mind">Changed mind</option><option value="damaged">Damaged</option><option value="missing_item">Missing item</option><option value="wrong_item">Wrong item</option></select></label><label><span>Product category</span><input required value={form.product_category} onChange={(event) => update("product_category", event.target.value)} /></label></div>{error && <div className="form-message error"><strong>Case could not be tested</strong><span>{error}</span></div>}<div className="form-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={submitting}>{submitting ? "Scoring case…" : "Run risk test →"}</button></div></form></div></div>;
 }
 
 
@@ -360,6 +472,7 @@ function CasePanel({
   const [explanation, setExplanation] = useState([]);
   const [review, setReview] = useState({ evidence: [], events: [] });
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [verifyingEvidence, setVerifyingEvidence] = useState(null);
   const [reviewError, setReviewError] = useState("");
   const [outcome, setOutcome] = useState("CONFIRMED_LEGITIMATE");
   const [outcomeNote, setOutcomeNote] = useState("");
@@ -422,7 +535,7 @@ function CasePanel({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Could not save decision.");
-      setCaseData((current) => ({ ...current, merchant_decision: data.merchant_decision }));
+      setCaseData((current) => ({ ...current, merchant_decision: data.merchant_decision, system_decision: data.system_decision }));
       await onCaseUpdated();
       await refreshReview();
     } catch (error) {
@@ -442,6 +555,17 @@ function CasePanel({
       await refreshReview();
     } catch (error) { setReviewError(error.message); }
     finally { setEvidenceUploading(false); }
+  }
+
+  async function verifyEvidence(evidenceId) {
+    setVerifyingEvidence(evidenceId); setReviewError("");
+    try {
+      const response = await fetch(`${API_URL}/cases/${caseId}/evidence/${evidenceId}/verify`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Evidence verification failed.");
+      await refreshReview();
+    } catch (error) { setReviewError(error.message); }
+    finally { setVerifyingEvidence(null); }
   }
 
   async function saveOutcome() {
@@ -501,6 +625,7 @@ function CasePanel({
                 <div><span>Claim</span><strong>{formatClaim(caseData.claim_type)}</strong></div>
                 <div><span>Category</span><strong>{formatClaim(caseData.product_category)}</strong></div>
                 <div><span>Order Value</span><strong>₹{Number(caseData.order_value).toLocaleString()}</strong></div>
+                {caseData.external_reference && <div><span>Merchant Reference</span><strong>{caseData.external_reference}</strong></div>}
               </div>
             </div>
 
@@ -515,9 +640,15 @@ function CasePanel({
               {decisionError && <div className="form-message error"><span>{decisionError}</span></div>}
             </div>
 
-            <div className="evidence-review"><div className="review-section-heading"><div><p className="eyebrow">EVIDENCE VERIFICATION</p><h3>Case evidence</h3></div><label className={`secondary-button ${evidenceUploading ? "disabled" : ""}`}>{evidenceUploading ? "Uploading…" : "＋ Add evidence"}<input type="file" accept=".pdf,image/jpeg,image/png,image/webp" disabled={evidenceUploading} onChange={(event) => uploadEvidence(event.target.files[0])} /></label></div><p>Attach delivery proof, invoices, product photos or courier scans. Files are recorded in the audit trail.</p>{review.evidence.length === 0 ? <div className="review-empty">No evidence uploaded yet.</div> : <div className="evidence-list">{review.evidence.map((item) => <a key={item.id} href={`${API_URL}${item.download_url}`} target="_blank" rel="noreferrer"><span>▤</span><div><strong>{item.filename}</strong><small>{(item.size_bytes / 1024).toFixed(1)} KB · {formatDate(item.created_at)}</small></div><b>Open ↗</b></a>)}</div>}<div className="outcome-form"><p className="eyebrow">VERIFIED OUTCOME</p><div><select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="CONFIRMED_LEGITIMATE">Confirmed legitimate</option><option value="CONFIRMED_ABUSE">Confirmed abuse</option><option value="CHARGEBACK_RECEIVED">Chargeback received</option><option value="EVIDENCE_ACCEPTED">Evidence accepted</option><option value="DECISION_REVERSED">Decision reversed</option></select><input placeholder="Optional reviewer note" value={outcomeNote} onChange={(event) => setOutcomeNote(event.target.value)} /><button className="primary-button" onClick={saveOutcome}>Record</button></div></div>{reviewError && <div className="form-message error"><span>{reviewError}</span></div>}</div>
+            <div className="evidence-review">
+              <div className="review-section-heading"><div><p className="eyebrow">EVIDENCE VERIFICATION</p><h3>Case evidence</h3></div><label className={`secondary-button ${evidenceUploading ? "disabled" : ""}`}>{evidenceUploading ? "Uploading…" : "＋ Add evidence"}<input type="file" accept=".pdf,image/jpeg,image/png,image/webp" disabled={evidenceUploading} onChange={(event) => uploadEvidence(event.target.files[0])} /></label></div>
+              <p>Attach delivery proof, invoices, product photos or courier scans, then verify the actual file against this claim.</p>
+              {review.evidence.length === 0 ? <div className="review-empty">No evidence uploaded yet.</div> : <div className="evidence-list">{review.evidence.map((item) => <div className="evidence-item" key={item.id}><div className="evidence-row"><a href={`${API_URL}${item.download_url}`} target="_blank" rel="noreferrer"><span>▤</span><div><strong>{item.filename}</strong><small>{(item.size_bytes / 1024).toFixed(1)} KB · {formatDate(item.created_at)}</small></div><b>Open ↗</b></a><button className="secondary-button" disabled={verifyingEvidence === item.id} onClick={() => verifyEvidence(item.id)}>{verifyingEvidence === item.id ? "Verifying…" : item.verification ? "Verify again" : "✦ Verify"}</button></div>{item.verification && <EvidenceVerificationCard verification={item.verification} />}</div>)}</div>}
+              <div className="outcome-form"><p className="eyebrow">VERIFIED OUTCOME</p><div><select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="CONFIRMED_LEGITIMATE">Confirmed legitimate</option><option value="CONFIRMED_ABUSE">Confirmed abuse</option><option value="CHARGEBACK_RECEIVED">Chargeback received</option><option value="EVIDENCE_ACCEPTED">Evidence accepted</option><option value="DECISION_REVERSED">Decision reversed</option></select><input placeholder="Optional reviewer note" value={outcomeNote} onChange={(event) => setOutcomeNote(event.target.value)} /><button className="primary-button" onClick={saveOutcome}>Record</button></div></div>
+              {reviewError && <div className="form-message error"><span>{reviewError}</span></div>}
+            </div>
 
-            {review.events.length > 0 && <div className="audit-trail"><p className="eyebrow">AUDIT TRAIL</p>{review.events.map((event) => <div key={event.id}><i></i><section><strong>{formatAction(event.value)}</strong><span>{formatClaim(event.event_type)} · {formatDate(event.created_at)}</span>{event.note && <p>{event.note}</p>}</section></div>)}</div>}
+            {review.events.length > 0 && <div className="audit-trail"><p className="eyebrow">AUDIT TRAIL</p>{review.events.map((event) => <div key={event.id}><i></i><section><strong>{formatAction(event.value)}</strong><span>{formatEventType(event.event_type)} · {formatDate(event.created_at)}</span>{event.note && <p>{formatEventNote(event)}</p>}</section></div>)}</div>}
 
             <div className="ai-investigation">
               <div className="ai-header">
@@ -611,6 +742,26 @@ function CasePanel({
   );
 }
 
+function EvidenceVerificationCard({ verification }) {
+  const result = verification.result || {};
+  const confidence = Math.round(Number(result.confidence || 0) * 100);
+  return (
+    <div className={`verification-result ${String(result.claim_consistency || "").toLowerCase()}`}>
+      <div className="verification-heading"><div><span>AI FILE ANALYSIS</span><strong>{formatAction(result.claim_consistency)}</strong></div><b>{confidence}% confidence</b></div>
+      <p>{result.document_summary}</p>
+      <div className="verification-meta"><span>{formatClaim(result.evidence_type)}</span><strong>{formatAction(result.recommended_action)}</strong></div>
+      {result.verified_facts?.length > 0 && <VerificationList title="Visible facts" items={result.verified_facts} />}
+      {result.inconsistencies?.length > 0 && <VerificationList title="Inconsistencies" items={result.inconsistencies} warning />}
+      {result.missing_information?.length > 0 && <VerificationList title="Still needed" items={result.missing_information} />}
+      <small>{result.limitations}</small>
+    </div>
+  );
+}
+
+function VerificationList({ title, items, warning }) {
+  return <div className={warning ? "verification-list warning" : "verification-list"}><strong>{title}</strong><ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul></div>;
+}
+
 function Detail({
   label,
   value
@@ -646,6 +797,14 @@ function formatAction(value) {
     .replace(/\b\w/g, (letter) =>
       letter.toUpperCase()
     );
+}
+
+function formatEventNote(event) {
+  return event.note;
+}
+
+function formatEventType(value) {
+  return formatClaim(value);
 }
 
 function formatCurrency(value) {

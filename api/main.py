@@ -9,10 +9,14 @@ from fastapi import (
 
 from pydantic import BaseModel, Field, model_validator
 
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timedelta, timezone
 import sys
 import io
+import json
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -48,6 +52,7 @@ from model_training import REQUIRED_COLUMNS, apply_cost_settings, save_model_art
 # AI Investigation Agent
 # ============================================================
 
+from agent.evidence_verifier import verify_evidence_file
 from agent.investigator import investigate_case
 
 
@@ -65,7 +70,7 @@ from database.database import (
     get_db
 )
 
-from database.models import CaseEvent, CaseEvidence, RiskCase
+from database.models import CaseEvent, CaseEvidence, EvidenceVerification, RiskCase
 
 
 # ============================================================
@@ -75,6 +80,36 @@ from database.models import CaseEvent, CaseEvidence, RiskCase
 Base.metadata.create_all(
     bind=engine
 )
+
+
+def migrate_local_schema():
+    """Apply the small additive migration required by existing SQLite demos."""
+
+    columns = {column["name"] for column in inspect(engine).get_columns("risk_cases")}
+    if "external_reference" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE risk_cases ADD COLUMN external_reference VARCHAR"))
+    if "system_decision" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE risk_cases ADD COLUMN system_decision VARCHAR"))
+    if "decision_due_at" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE risk_cases ADD COLUMN decision_due_at DATETIME"))
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE risk_cases SET system_decision = CASE "
+            "WHEN merchant_decision IS NOT NULL THEN 'MERCHANT_OVERRIDE' "
+            "WHEN recommended_action = 'AUTO_APPROVE' THEN 'PENDING_AUTO_APPROVAL' "
+            "WHEN recommended_action = 'REQUEST_EVIDENCE' THEN 'EVIDENCE_REQUIRED' "
+            "ELSE 'MANUAL_REVIEW' END WHERE system_decision IS NULL"
+        ))
+        connection.execute(text(
+            "UPDATE risk_cases SET decision_due_at = datetime(created_at, '+1 hour') "
+            "WHERE recommended_action = 'AUTO_APPROVE' AND decision_due_at IS NULL"
+        ))
+
+
+migrate_local_schema()
 
 
 # ============================================================
@@ -87,7 +122,7 @@ app = FastAPI(
         "AI-powered ecommerce return-abuse "
         "risk management API."
     ),
-    version="0.3.0"
+    version="0.4.0"
 )
 
 
@@ -208,6 +243,10 @@ class ReturnRequest(BaseModel):
         return self
 
 
+class CaseCreateRequest(ReturnRequest):
+    external_reference: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 # ============================================================
 # Merchant decision schema
 # ============================================================
@@ -237,7 +276,7 @@ def root():
     return {
         "name": "AI Risk Manager API",
         "status": "running",
-        "version": "0.3.0"
+        "version": "0.4.0"
     }
 
 
@@ -320,13 +359,68 @@ def predict(
     }
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def utc_iso(value: datetime | None):
+    return value.replace(tzinfo=timezone.utc).isoformat() if value else None
+
+
+def schedule_case_decision(case: RiskCase, db: Session) -> None:
+    if case.recommended_action == "AUTO_APPROVE":
+        delay_seconds = max(1, int(os.getenv("AUTO_APPROVAL_DELAY_SECONDS", "3600")))
+        case.system_decision = "PENDING_AUTO_APPROVAL"
+        case.decision_due_at = utc_now() + timedelta(seconds=delay_seconds)
+        event = CaseEvent(
+            case_id=case.id,
+            event_type="AUTO_APPROVAL_SCHEDULED",
+            value="PENDING_AUTO_APPROVAL",
+            note=f"Automatic approval is scheduled for {utc_iso(case.decision_due_at)}.",
+        )
+    elif case.recommended_action == "REQUEST_EVIDENCE":
+        case.system_decision = "EVIDENCE_REQUIRED"
+        event = CaseEvent(case_id=case.id, event_type="SYSTEM_ROUTING", value="EVIDENCE_REQUIRED", note="Evidence is required before a final decision.")
+    else:
+        case.system_decision = "MANUAL_REVIEW"
+        event = CaseEvent(case_id=case.id, event_type="SYSTEM_ROUTING", value="MANUAL_REVIEW", note="A merchant decision is required.")
+    db.add(case)
+    db.add(event)
+    db.commit()
+    db.refresh(case)
+
+
+def finalize_due_auto_approvals(db: Session) -> None:
+    due_cases = (
+        db.query(RiskCase)
+        .filter(
+            RiskCase.system_decision == "PENDING_AUTO_APPROVAL",
+            RiskCase.merchant_decision.is_(None),
+            RiskCase.decision_due_at.is_not(None),
+            RiskCase.decision_due_at <= utc_now(),
+        )
+        .all()
+    )
+    for case in due_cases:
+        case.system_decision = "AUTO_APPROVED"
+        db.add(case)
+        db.add(CaseEvent(
+            case_id=case.id,
+            event_type="AUTO_APPROVED",
+            value="APPROVED",
+            note="The review window expired without an override; payment was approved automatically.",
+        ))
+    if due_cases:
+        db.commit()
+
+
 # ============================================================
 # Create a risk case
 # ============================================================
 
 @app.post("/cases")
 def create_case(
-    request: ReturnRequest,
+    request: CaseCreateRequest,
     db: Session = Depends(get_db)
 ):
 
@@ -334,7 +428,7 @@ def create_case(
     # Convert request to dictionary
     # --------------------------------------------------------
 
-    request_data = request.model_dump()
+    request_data = request.model_dump(exclude={"external_reference"})
 
 
     # --------------------------------------------------------
@@ -396,7 +490,9 @@ def create_case(
 
         recommended_action=result[
             "action"
-        ]
+        ],
+
+        external_reference=request.external_reference
     )
 
 
@@ -409,6 +505,8 @@ def create_case(
     db.commit()
 
     db.refresh(case)
+
+    schedule_case_decision(case, db)
 
 
     # --------------------------------------------------------
@@ -436,6 +534,15 @@ def create_case(
             "merchant_decision":
                 case.merchant_decision,
 
+            "external_reference":
+                case.external_reference,
+
+            "system_decision":
+                case.system_decision,
+
+            "decision_due_at":
+                utc_iso(case.decision_due_at),
+
             "created_at":
                 case.created_at
         }
@@ -451,6 +558,8 @@ def get_cases(
     db: Session = Depends(get_db)
 ):
 
+    finalize_due_auto_approvals(db)
+
     cases = (
         db.query(RiskCase)
         .order_by(
@@ -458,7 +567,6 @@ def get_cases(
         )
         .all()
     )
-
 
     return {
         "success": True,
@@ -491,6 +599,15 @@ def get_cases(
                 "order_value":
                     case.order_value,
 
+                "external_reference":
+                    case.external_reference,
+
+                "system_decision":
+                    case.system_decision,
+
+                "decision_due_at":
+                    utc_iso(case.decision_due_at),
+
                 "created_at":
                     case.created_at
             }
@@ -509,6 +626,8 @@ def get_case(
     case_id: int,
     db: Session = Depends(get_db)
 ):
+
+    finalize_due_auto_approvals(db)
 
     case = (
         db.query(RiskCase)
@@ -533,6 +652,15 @@ def get_case(
         "case": {
 
             "id": case.id,
+
+            "external_reference":
+                case.external_reference,
+
+            "system_decision":
+                case.system_decision,
+
+            "decision_due_at":
+                utc_iso(case.decision_due_at),
 
             "customer_age_days":
                 case.customer_age_days,
@@ -654,7 +782,6 @@ def investigate(
             status_code=404,
             detail="Case not found"
         )
-
 
     # --------------------------------------------------------
     # Convert database case into dictionary
@@ -789,6 +916,14 @@ def update_decision(
             detail="Case not found"
         )
 
+    if (
+        case.recommended_action == "AUTO_APPROVE"
+        and case.decision_due_at is not None
+        and case.decision_due_at <= utc_now()
+    ):
+        finalize_due_auto_approvals(db)
+        raise HTTPException(status_code=409, detail="The one-hour decision window has closed.")
+
 
     allowed_decisions = [
         "APPROVED",
@@ -813,6 +948,9 @@ def update_decision(
         decision.decision
     )
 
+    if case.recommended_action == "AUTO_APPROVE":
+        case.system_decision = "MERCHANT_OVERRIDE"
+
     db.add(CaseEvent(
         case_id=case.id,
         event_type="MERCHANT_DECISION",
@@ -831,8 +969,44 @@ def update_decision(
         "case_id": case.id,
 
         "merchant_decision":
-            case.merchant_decision
+            case.merchant_decision,
+
+        "system_decision":
+            case.system_decision
     }
+
+
+# ============================================================
+# Delete a case and its review data
+# ============================================================
+
+@app.delete("/cases/{case_id}")
+def delete_case(case_id: int, db: Session = Depends(get_db)):
+    case = db.query(RiskCase).filter(RiskCase.id == case_id).first()
+    if case is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    evidence = db.query(CaseEvidence).filter(CaseEvidence.case_id == case_id).all()
+    storage_paths = [Path(item.storage_path) for item in evidence]
+
+    db.query(EvidenceVerification).filter(EvidenceVerification.case_id == case_id).delete(synchronize_session=False)
+    db.query(CaseEvent).filter(CaseEvent.case_id == case_id).delete(synchronize_session=False)
+    db.query(CaseEvidence).filter(CaseEvidence.case_id == case_id).delete(synchronize_session=False)
+    db.delete(case)
+    db.commit()
+
+    evidence_root = EVIDENCE_DIR.resolve()
+    for storage_path in storage_paths:
+        resolved_path = storage_path.resolve()
+        if resolved_path.is_relative_to(evidence_root):
+            resolved_path.unlink(missing_ok=True)
+    case_directory = EVIDENCE_DIR / str(case_id)
+    try:
+        case_directory.rmdir()
+    except OSError:
+        pass
+
+    return {"success": True, "case_id": case_id, "deleted": True}
 
 
 # ============================================================
@@ -845,6 +1019,25 @@ def get_case_review(case_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Case not found")
     evidence = db.query(CaseEvidence).filter(CaseEvidence.case_id == case_id).order_by(CaseEvidence.created_at.desc()).all()
     events = db.query(CaseEvent).filter(CaseEvent.case_id == case_id).order_by(CaseEvent.created_at.desc()).all()
+    verifications = (
+        db.query(EvidenceVerification)
+        .filter(EvidenceVerification.case_id == case_id)
+        .order_by(EvidenceVerification.created_at.desc())
+        .all()
+    )
+    latest_verification = {}
+    for verification in verifications:
+        if verification.evidence_id not in latest_verification:
+            try:
+                result = json.loads(verification.result_json)
+            except json.JSONDecodeError:
+                result = {"document_summary": "Stored verification could not be decoded."}
+            latest_verification[verification.evidence_id] = {
+                "id": verification.id,
+                "status": verification.status,
+                "created_at": verification.created_at,
+                "result": result,
+            }
     return {
         "success": True,
         "evidence": [{
@@ -854,6 +1047,7 @@ def get_case_review(case_id: int, db: Session = Depends(get_db)):
             "size_bytes": item.size_bytes,
             "created_at": item.created_at,
             "download_url": f"/cases/{case_id}/evidence/{item.id}",
+            "verification": latest_verification.get(item.id),
         } for item in evidence],
         "events": [{
             "id": event.id,
@@ -904,6 +1098,53 @@ def download_case_evidence(case_id: int, evidence_id: int, db: Session = Depends
     if item is None or not Path(item.storage_path).is_file():
         raise HTTPException(status_code=404, detail="Evidence not found")
     return FileResponse(item.storage_path, media_type=item.content_type, filename=item.filename)
+
+
+@app.post("/cases/{case_id}/evidence/{evidence_id}/verify")
+async def verify_case_evidence(case_id: int, evidence_id: int, db: Session = Depends(get_db)):
+    case = db.query(RiskCase).filter(RiskCase.id == case_id).first()
+    item = db.query(CaseEvidence).filter(CaseEvidence.id == evidence_id, CaseEvidence.case_id == case_id).first()
+    if case is None or item is None or not Path(item.storage_path).is_file():
+        raise HTTPException(status_code=404, detail="Case evidence not found")
+
+    try:
+        result = await run_in_threadpool(
+            verify_evidence_file,
+            case,
+            Path(item.storage_path).read_bytes(),
+            item.content_type,
+            item.filename,
+        )
+    except Exception as error:
+        print(f"Evidence verification failed: {error}")
+        raise HTTPException(status_code=503, detail="AI evidence verification is temporarily unavailable.") from error
+
+    verification = EvidenceVerification(
+        evidence_id=item.id,
+        case_id=case.id,
+        status="COMPLETED",
+        result_json=json.dumps(result),
+    )
+    db.add(verification)
+    db.add(CaseEvent(
+        case_id=case.id,
+        event_type="EVIDENCE_VERIFIED",
+        value=result["claim_consistency"],
+        note=f"{item.filename}: {result['recommended_action']} at {result['confidence']:.0%} confidence.",
+    ))
+    db.commit()
+    db.refresh(verification)
+    return {
+        "success": True,
+        "case_id": case.id,
+        "evidence_id": item.id,
+        "verification": {
+            "id": verification.id,
+            "status": verification.status,
+            "created_at": verification.created_at,
+            "result": result,
+        },
+    }
 
 
 @app.post("/cases/{case_id}/outcome")

@@ -152,6 +152,21 @@ class RiskCase(Base):
         nullable=False
     )
 
+    external_reference = Column(
+        String,
+        nullable=True
+    )
+
+    system_decision = Column(
+        String,
+        nullable=True
+    )
+
+    decision_due_at = Column(
+        DateTime,
+        nullable=True
+    )
+
 
     # --------------------------------------------------------
     # Merchant decision
@@ -194,4 +209,15 @@ class CaseEvent(Base):
     event_type = Column(String, nullable=False)
     value = Column(String, nullable=False)
     note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class EvidenceVerification(Base):
+    __tablename__ = "evidence_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    evidence_id = Column(Integer, ForeignKey("case_evidence.id"), nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey("risk_cases.id"), nullable=False, index=True)
+    status = Column(String, nullable=False)
+    result_json = Column(Text, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

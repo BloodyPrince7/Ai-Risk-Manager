@@ -57,6 +57,14 @@ GEMINI_API_KEY=your_gemini_api_key_here
 The key is required when the backend starts because the Gemini investigator is
 loaded with the API. Never commit `.env`; it is excluded by `.gitignore`.
 
+Low-risk returns use a one-hour review window before the system finalizes their
+approval. Keep the production value at `3600`, or use a shorter value such as
+`60` for a local one-minute demo:
+
+```dotenv
+AUTO_APPROVAL_DELAY_SECONDS=3600
+```
+
 ### 3. Generate the baseline model
 
 Generated datasets and model artifacts are intentionally not committed. Create
@@ -100,7 +108,8 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. The dashboard expects the API at
+Open <http://localhost:5173> for the AI Risk Manager dashboard and
+<http://localhost:5173/store> for the separate ecommerce order page. Both pages expect the API at
 `http://127.0.0.1:8000`; this value is currently defined by `API_URL` in
 `frontend/src/App.jsx`.
 
@@ -162,6 +171,9 @@ The React dashboard provides:
 - Configurable false-positive and false-negative costs
 - Model-native XGBoost feature contributions
 - Evidence uploads, verified outcomes, and an audit trail
+- Multimodal AI verification of uploaded PDFs and images
+- A persisted one-hour auto-approval window for low-risk returns
+- A separate ecommerce order page with live countdown and override controls
 - Live risk-distribution donut and score-band histogram
 - Held-out precision/recall/F1/accuracy performance bars
 - Interactive cost-versus-threshold curve with the selected policy highlighted
@@ -219,8 +231,8 @@ This gives merchants an explanation instead of only showing a numerical risk sco
 
 ```text
                  ┌─────────────────────┐
-                 │     React Frontend  │
-                 │   Merchant Console  │
+                 │    React Frontends  │
+                 │ Console + /store UI │
                  └──────────┬──────────┘
                             │
                             ▼
@@ -236,6 +248,7 @@ This gives merchants an explanation instead of only showing a numerical risk sco
       │   ML Risk Model │       │    Gemini AI    │
       │     XGBoost     │       │ Investigation   │
       └─────────────────┘       └─────────────────┘
+```
 
 The backend owns prediction, model training, threshold selection, persistence,
 evidence storage, and Gemini calls. The frontend communicates with it over JSON
@@ -259,6 +272,50 @@ is stored on disk.
    keeps model output, evidence, human decisions, and outcomes in its audit trail.
 
 Evidence uploads must be PDF, JPEG, PNG, or WebP files no larger than 5 MB.
+Select **Verify** beside an upload to make Gemini inspect the actual file. The
+result separates visible facts, inconsistencies, missing authoritative records,
+claim consistency, limitations, recommended action, and confidence. File-only AI
+analysis never claims that a document is definitively authentic.
+
+### Review orders like a commerce storefront
+
+Open <http://localhost:5173/store> for a shopping-style history that is separate
+from the AI Risk Manager dashboard. Every order card clearly shows:
+
+- a scheduled refund and live payment countdown for low-risk returns;
+- the final auto-approved result after the countdown expires;
+- a reviewer-approved result when **Approve now** is selected;
+- a rejected result when **Reject return** is selected.
+
+Use the search box to find an order by reference, product, claim, category, or
+status. Combine it with status, product-category, and ML risk-level filters.
+Each card also has a confirmed **Delete** action that permanently removes the
+case, its evidence files, verifications, and audit events.
+
+During the countdown, **Approve now** releases the return immediately and
+**Reject return** stops it. After the deadline, the backend finalizes the case as
+`AUTO_APPROVED`; the decision can no longer be changed. The storefront polls the
+same API every three seconds, so dashboard and order history stay synchronized.
+
+The **Risk Cases** table is an active work queue. Manually approved and rejected
+cases leave the queue immediately. System auto-approved cases also leave the
+queue and remain visible in the storefront; escalated cases stay until a final
+decision is recorded.
+
+### Timed decision workflow
+
+Creating a case persists the model policy as an order state:
+
+| Model policy | Persisted state |
+|---|---|
+| `AUTO_APPROVE` | `PENDING_AUTO_APPROVAL`, then `AUTO_APPROVED` after the deadline |
+| `REQUEST_EVIDENCE` | `EVIDENCE_REQUIRED` |
+| `MANUAL_REVIEW` | `MANUAL_REVIEW` |
+
+The deadline is stored with the case rather than held in browser memory. Any
+`GET /cases` request finalizes expired low-risk windows, records an audit event,
+and returns the new state. This project intentionally does not call an external
+payment provider; the payment state is a demo workflow stored in SQLite.
 
 ### Train a merchant model
 
@@ -324,12 +381,14 @@ The full request and response schemas are available in Swagger at `/docs`.
 | `POST` | `/cases` | Score and persist a case |
 | `GET` | `/cases` | List cases |
 | `GET` | `/cases/{case_id}` | Read one case |
+| `DELETE` | `/cases/{case_id}` | Permanently delete a case and its related review data |
 | `GET` | `/cases/{case_id}/explanation` | Get XGBoost feature contributions |
 | `POST` | `/cases/{case_id}/investigate` | Run the Gemini investigation |
 | `PATCH` | `/cases/{case_id}/decision` | Record `APPROVED`, `REJECTED`, or `ESCALATED` |
 | `GET` | `/cases/{case_id}/review` | Read evidence and audit events |
 | `POST` | `/cases/{case_id}/evidence` | Upload raw evidence with `Content-Type` and `X-Filename` headers |
 | `GET` | `/cases/{case_id}/evidence/{evidence_id}` | Download evidence |
+| `POST` | `/cases/{case_id}/evidence/{evidence_id}/verify` | Analyze the actual PDF/image against the claim |
 | `POST` | `/cases/{case_id}/outcome` | Record a verified outcome |
 | `GET` | `/feedback/summary` | Get review, disagreement, and loss estimates |
 | `GET` | `/model/status` | Read model provenance, metrics, policy, and cost curve |

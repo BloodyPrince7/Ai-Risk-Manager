@@ -2,7 +2,9 @@
 
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -13,6 +15,7 @@ import api.main as api
 
 
 LOW_RISK_CASE = {
+    "external_reference": "ORDER-TEST-001",
     "customer_age_days": 900,
     "previous_orders": 24,
     "previous_returns": 1,
@@ -27,6 +30,19 @@ LOW_RISK_CASE = {
     "payment_failures": 0,
     "claim_type": "changed_mind",
     "product_category": "fashion",
+}
+
+EVIDENCE_RESULT = {
+    "evidence_type": "delivery proof",
+    "document_summary": "The image shows a delivery confirmation.",
+    "claim_consistency": "SUPPORTS_CLAIM",
+    "verified_facts": ["A delivery status is visible."],
+    "inconsistencies": [],
+    "authenticity_signals": ["Tracking reference is visible."],
+    "missing_information": ["Carrier API confirmation."],
+    "recommended_action": "MANUAL_REVIEW",
+    "confidence": 0.81,
+    "limitations": "The image alone cannot prove authenticity.",
 }
 
 
@@ -55,6 +71,13 @@ class WorkflowTest(unittest.TestCase):
         created = self.client.post("/cases", json=LOW_RISK_CASE)
         self.assertEqual(created.status_code, 200)
         case_id = created.json()["case"]["id"]
+        self.assertEqual(created.json()["case"]["external_reference"], "ORDER-TEST-001")
+        self.assertEqual(created.json()["case"]["system_decision"], "PENDING_AUTO_APPROVAL")
+        self.assertIsNotNone(created.json()["case"]["decision_due_at"])
+
+        listed = self.client.get("/cases").json()["cases"]
+        order = next(item for item in listed if item["id"] == case_id)
+        self.assertEqual(order["system_decision"], "PENDING_AUTO_APPROVAL")
 
         explanation = self.client.get(f"/cases/{case_id}/explanation")
         self.assertEqual(explanation.status_code, 200)
@@ -62,6 +85,7 @@ class WorkflowTest(unittest.TestCase):
 
         decision = self.client.patch(f"/cases/{case_id}/decision", json={"decision": "APPROVED"})
         self.assertEqual(decision.json()["merchant_decision"], "APPROVED")
+        self.assertEqual(decision.json()["system_decision"], "MERCHANT_OVERRIDE")
 
         evidence = self.client.post(
             f"/cases/{case_id}/evidence",
@@ -69,6 +93,12 @@ class WorkflowTest(unittest.TestCase):
             headers={"content-type": "image/png", "x-filename": "delivery.png"},
         )
         self.assertEqual(evidence.status_code, 200)
+        evidence_id = evidence.json()["evidence_id"]
+
+        with patch("api.main.verify_evidence_file", return_value=EVIDENCE_RESULT):
+            verified = self.client.post(f"/cases/{case_id}/evidence/{evidence_id}/verify")
+        self.assertEqual(verified.status_code, 200)
+        self.assertEqual(verified.json()["verification"]["result"]["claim_consistency"], "SUPPORTS_CLAIM")
 
         outcome = self.client.post(
             f"/cases/{case_id}/outcome",
@@ -78,10 +108,55 @@ class WorkflowTest(unittest.TestCase):
 
         review = self.client.get(f"/cases/{case_id}/review").json()
         self.assertEqual(len(review["evidence"]), 1)
-        self.assertEqual(len(review["events"]), 3)
+        self.assertEqual(review["evidence"][0]["verification"]["result"]["confidence"], 0.81)
+        self.assertEqual(len(review["events"]), 5)
         feedback = self.client.get("/feedback/summary").json()
         self.assertEqual(feedback["verified_cases"], 1)
         self.assertEqual(feedback["human_decisions"], 1)
+
+    def test_due_auto_approval_and_closed_override_window(self):
+        payload = {**LOW_RISK_CASE, "external_reference": "ORDER-TEST-002"}
+        created = self.client.post("/cases", json=payload)
+        self.assertEqual(created.status_code, 200)
+        case_id = created.json()["case"]["id"]
+
+        with self.session_factory() as db:
+            case = db.query(api.RiskCase).filter(api.RiskCase.id == case_id).first()
+            case.decision_due_at = api.utc_now() - timedelta(seconds=1)
+            db.commit()
+
+        listed = self.client.get("/cases").json()["cases"]
+        order = next(item for item in listed if item["id"] == case_id)
+        self.assertEqual(order["system_decision"], "AUTO_APPROVED")
+
+        too_late = self.client.patch(f"/cases/{case_id}/decision", json={"decision": "REJECTED"})
+        self.assertEqual(too_late.status_code, 409)
+
+    def test_delete_case_removes_related_review_data_and_file(self):
+        payload = {**LOW_RISK_CASE, "external_reference": "ORDER-DELETE-001"}
+        case_id = self.client.post("/cases", json=payload).json()["case"]["id"]
+        evidence = self.client.post(
+            f"/cases/{case_id}/evidence",
+            content=b"delete-me",
+            headers={"content-type": "image/png", "x-filename": "delete.png"},
+        )
+        evidence_id = evidence.json()["evidence_id"]
+        with patch("api.main.verify_evidence_file", return_value=EVIDENCE_RESULT):
+            self.client.post(f"/cases/{case_id}/evidence/{evidence_id}/verify")
+
+        with self.session_factory() as db:
+            item = db.query(api.CaseEvidence).filter(api.CaseEvidence.id == evidence_id).first()
+            storage_path = Path(item.storage_path)
+        self.assertTrue(storage_path.exists())
+
+        deleted = self.client.delete(f"/cases/{case_id}")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertFalse(storage_path.exists())
+        self.assertEqual(self.client.get(f"/cases/{case_id}").status_code, 404)
+        with self.session_factory() as db:
+            self.assertEqual(db.query(api.CaseEvent).filter(api.CaseEvent.case_id == case_id).count(), 0)
+            self.assertEqual(db.query(api.CaseEvidence).filter(api.CaseEvidence.case_id == case_id).count(), 0)
+            self.assertEqual(db.query(api.EvidenceVerification).filter(api.EvidenceVerification.case_id == case_id).count(), 0)
 
     def test_cost_recalculation_and_ratio_validation(self):
         costs = self.client.patch(
